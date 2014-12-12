@@ -7,6 +7,9 @@ Licensed under the Apache License, Version 2.0 (the "License"); you may not use 
 
     http://www.apache.org/licenses/LICENSE-2.0
 
+Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and limitations under the License.
+
 ## Overview
 
 EMCVNXeDriver (a.k.a. VNXe Cinder Driver) is based on the SanDriver defined in Cinder, with the ability to create/delete, attach/detach volumes, create/delete snapshots, etc. 
@@ -15,7 +18,7 @@ EMCVNXeDriver performs the volume operations by Restful API management interface
 
 ## Supported OpenStack Release
 
-This driver supports IceHouse and newer release.
+This driver supports Juno release.
 
 ## Requirements
 
@@ -157,6 +160,13 @@ During volume creation, if the driver find `storagetype:provisioning` in the ext
 
 ## FC SAN Auto Zoning
 
-VNXe Cinder Driver support FC SAN Auto Zoning with the support of ZoneManager. Set "zoning_mode" to "fabric" in backend's configuration section to enable this feature. For ZoneManager's configuration, please refer to Cinder's offical guide.
+VNXe cinder driver supports FC SAN auto zoning when ZoneManager is configured. Set "zoning_mode" to "fabric" in default section to enable this feature. For ZoneManager configuration, please refer to Block Storage official guide.
 
-FC SAN Auto Zoning only support zone creation temporarily.
+## Read-only Volumes
+
+OpenStack support read-only volumes. Either of the following commands can be used to set a volume read-only.
+
+        cinder --os-username admin --os-tenant-name admin metadata <volume> set 'attached_mode'='ro'
+        cinder --os-username admin --os-tenant-name admin metadata <volume> set 'readonly'='True'
+
+After a volume is marked as read-only, the driver will forward the information when a hypervisor is attaching the volume and the hypervisor will have implementation-specific way to make sure the volume is not written.

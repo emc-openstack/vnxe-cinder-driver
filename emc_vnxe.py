@@ -23,22 +23,27 @@ import re
 import urllib2
 
 from oslo.config import cfg
-
 import taskflow.engines
 from taskflow.patterns import linear_flow
 from taskflow import task
 from taskflow.utils import misc
 
 from cinder import exception
+from cinder.i18n import _
+from cinder.openstack.common import lockutils
 from cinder.openstack.common import log as logging
+from cinder.volume.configuration import Configuration
 from cinder.volume.drivers.san import san
+from cinder.volume import manager
 from cinder.volume import volume_types
+from cinder.zonemanager.utils import AddFCZone
+from cinder.zonemanager.utils import RemoveFCZone
 
 LOG = logging.getLogger(__name__)
 
 
 CONF = cfg.CONF
-VERSION = '00.01.00'
+VERSION = '00.02.00'
 
 GiB = 1024 * 1024 * 1024
 
@@ -397,6 +402,26 @@ class EMCUnityRESTClient(object):
         # 108007456: there is nothing to modify
         return err, resp
 
+    def modify_lun_name(self, lun_id, new_name):
+        """modify the lun name"""
+        lun_modify_url = \
+            '/api/instances/storageResource/%s/action/modifyLun' % lun_id
+        data = {'name': new_name}
+        err, resp = self._request(lun_modify_url, data)
+        if err:
+            if (str(err['messages'][0]['en-US']).find(
+                    'Error Code:0x6701020') >= 0):
+                msg = (_('The new name %(name)s for lun '
+                       '%(lun)s already exists.') %
+                       {'name': new_name, 'lun': lun_id})
+                LOG.warn(msg)
+            else:
+                reason = (_('Manage existing lun failed. Can not '
+                          'rename the lun %(lun)s to %(name)s') %
+                          {'lun': lun_id, 'name': new_name})
+                raise exception.VolumeBackendAPIException(
+                    data=reason)
+
 
 class ArrangeHostTask(task.Task):
 
@@ -408,7 +433,8 @@ class ArrangeHostTask(task.Task):
 
     def execute(self, *args, **kwargs):
         LOG.debug('ArrangeHostTask.execute %s', self.connector)
-        return self.helper.arrange_host(self.connector)
+        host_id = self.helper.arrange_host(self.connector)
+        return host_id
 
 
 class ExposeLUNTask(task.Task):
@@ -482,11 +508,14 @@ class EMCUnityHelper(object):
         self.storage_password = self.configuration.san_password
         self.lookup_service_instance = None
         #here we use group config to keep same as cinder manager
-        if self.configuration.zoning_mode == 'fabric':
+        zm_conf = Configuration(manager.volume_manager_opts)
+        if (zm_conf.safe_get('zoning_mode') == 'fabric' or
+                self.configuration.safe_get('zoning_mode') == 'fabric'):
             from cinder.zonemanager.fc_san_lookup_service \
                 import FCSanLookupService
             self.lookup_service_instance = \
                 FCSanLookupService(configuration=self.configuration)
+
         self.client = EMCUnityRESTClient(self.active_storage_ip, 443,
                                          self.storage_username,
                                          self.storage_password,
@@ -799,8 +828,8 @@ class EMCUnityHelper(object):
         target_wwns = []
         init_targ_map = {}
 
-        for san in mapping:
-            mymap = mapping[san]
+        for san_name in mapping:
+            mymap = mapping[san_name]
             for target in mymap['target_port_wwn_list']:
                 if target not in target_wwns:
                     target_wwns.append(target)
@@ -831,7 +860,17 @@ class EMCUnityHelper(object):
 
     def expose_lun(self, volume, host_id):
         lun_id = self._extra_lun_or_snap_id(volume)
-        err, resp = self.client.expose_lun(lun_id, host_id)
+
+        if self.lookup_service_instance and self.storage_protocol == 'FC':
+            @lockutils.synchronized('emc-vnxe-host-' + host_id,
+                                    "emc-vnxe-host-", True)
+            def _expose_lun():
+                return self.client.expose_lun(lun_id, host_id)
+
+            err, resp = _expose_lun()
+        else:
+            err, resp = self.client.expose_lun(lun_id, host_id)
+
         if err:
             print(resp)  # Get rid of warning
             if err['errorCode'] in (0x6701020,):
@@ -853,6 +892,16 @@ class EMCUnityHelper(object):
             return 'fibre_channel'
         else:
             return 'unknown'
+
+    def _get_fc_zone_info(self, connector, targets):
+        initiator_wwns = connector['wwpns']
+        target_wwns = [item[1] for item in targets]
+        mapping = self.lookup_service_instance.\
+            get_device_mapping_from_network(initiator_wwns,
+                                            target_wwns)
+        target_wwns, init_targ_map = self._build_init_targ_map(mapping)
+        return {'initiator_target_map': init_targ_map,
+                'target_wwn': target_wwns}
 
     def get_connection_info(self, volume, connector, host_id):
         data = {'target_discovered': True,
@@ -905,14 +954,8 @@ class EMCUnityHelper(object):
                     if path['isLoggedIn']:
                         logined_fc_set.add(path['fcPort']['id'])
             if self.lookup_service_instance:
-                initiator_wwns = connector['wwpns']
-                target_wwns = [item[1] for item in targets]
-                mapping = self.lookup_service_instance.\
-                    get_device_mapping_from_network(initiator_wwns,
-                                                    target_wwns)
-                target_wwns, init_targ_map = self._build_init_targ_map(mapping)
-                data['initiator_target_map'] = init_targ_map
-                data['target_wwn'] = target_wwns
+                zone_info = self._get_fc_zone_info(connector, targets)
+                data.update(zone_info)
             else:
                 accessible_targets = filter(lambda entry:
                                             entry[2] in logined_fc_set,
@@ -934,6 +977,25 @@ class EMCUnityHelper(object):
         if not host_lun:
             pass
         data['target_lun'] = host_lun[0]['hlu']
+
+        access_mode = None
+        if volume.get('volume_admin_metadata'):
+            volume_metadata = {}
+            for metadata in volume['volume_admin_metadata']:
+                volume_metadata[metadata['key']] = metadata['value']
+            access_mode = volume_metadata.get('attached_mode')
+            if access_mode is None:
+                access_mode = ('ro'
+                               if volume_metadata.get('readonly') == 'True'
+                               else 'rw')
+        else:
+            access_mode = 'rw'
+
+        LOG.debug('Volume %(vol)s Access mode is: %(access)s.'
+                  % {'vol': volume['name'],
+                     'access': access_mode})
+        data['access_mode'] = access_mode
+
         connection_info = {
             'driver_volume_type': self._get_driver_volume_type(),
             'data': data}
@@ -947,8 +1009,7 @@ class EMCUnityHelper(object):
                         GetConnectionInfoTask(self, volume, connector))
 
         flow_engine = taskflow.engines.load(volume_flow,
-                                            store={'host_id': '',
-                                                   'connection_info': ''})
+                                            store={})
         flow_engine.run()
         return json.loads(flow_engine.storage.fetch('connection_info'))
 
@@ -974,6 +1035,21 @@ class EMCUnityHelper(object):
                 {'vol': volume['name'], 'host': host_id}
             raise exception.VolumeBackendAPIException(data=err['messages'])
 
+    def get_fc_zone_info_for_empty_host(self, connector, host_id):
+
+        @lockutils.synchronized('emc-vnxe-host-' + host_id,
+                                "emc-vnxe-host-", True)
+        def _get_fc_zone_info_in_sync():
+            if self.isHostContainsLUNs(host_id):
+                return {}
+            else:
+                targets = self.storage_targets['a'] + self.storage_targets['b']
+                return self._get_fc_zone_info(connector,
+                                              targets)
+        return {
+            'driver_volume_type': self._get_driver_volume_type(),
+            'data': _get_fc_zone_info_in_sync()}
+
     def terminate_connection(self, volume, connector, **kwargs):
 
         registered_initiators, orphan_initiators, new_initiator_uids = \
@@ -984,8 +1060,21 @@ class EMCUnityHelper(object):
             print(orphan_initiators, new_initiator_uids)  # Get rid of warning
             msg = _("Host using %s is not found.") % volume['name']
             LOG.warn(msg)
+        else:
+            self.hide_lun(volume, host_id)
+
+        if self.lookup_service_instance and self.storage_protocol == 'FC':
+            return self.get_fc_zone_info_for_empty_host(connector, host_id)
+        else:
             return
-        self.hide_lun(volume, host_id)
+
+    def isHostContainsLUNs(self, host_id):
+        host = self.client.get_host_by_id(host_id, ('hostLUNs',))
+        if not host:
+            return False
+        else:
+            luns = host[0]['hostLUNs']
+            return True if luns else False
 
     def get_volume_stats(self, refresh=False):
         if refresh:
@@ -1015,6 +1104,42 @@ class EMCUnityHelper(object):
         self.stats = data
         LOG.debug('Volume Stats: %s', data)
         return self.stats
+
+    def manage_existing_get_size(self, volume, ref):
+        """Return size of volume to be managed by manage_existing.
+        """
+        # Check that the reference is valid
+        if 'id' not in ref:
+            reason = _('Reference must contain lun_id element.')
+            raise exception.VolumeBackendAPIException(
+                data=reason)
+
+        # Check for existence of the lun
+        lun = self.client.get_lun_by_id(ref['id'])
+        if len(lun) == 0:
+            reason = _('Find no lun with the specified lun_id %s.') % ref['id']
+            raise exception.VolumeBackendAPIException(
+                data=reason)
+
+        if lun[0]['pool']['id'] != self.pool_id:
+            reason = _('The input lun %s is not in a manageable '
+                       'pool backend') % ref['id']
+            raise exception.VolumeBackendAPIException(
+                data=reason)
+        return lun[0]['sizeTotal'] / GiB
+
+    def manage_existing(self, volume, ref):
+        """Manage an existing lun in the array.
+        """
+        self.client.modify_lun_name(ref['id'], volume['name'])
+
+        pl_dict = {'system': self.storage_serial_number,
+                   'type': 'lun',
+                   'id': ref['id']}
+        model_update = {'provider_location':
+                        self._dumps_provider_location(pl_dict)}
+        volume['provider_location'] = model_update['provider_location']
+        return model_update
 
 
 class EMCVNXeDriver(san.SanDriver):
@@ -1074,9 +1199,11 @@ class EMCVNXeDriver(san.SanDriver):
     def extend_volume(self, volume, new_size):
         return self.helper.extend_volume(volume, new_size)
 
+    @AddFCZone
     def initialize_connection(self, volume, connector):
         return self.helper.initialize_connection(volume, connector)
 
+    @RemoveFCZone
     def terminate_connection(self, volume, connector, **kwargs):
         return self.helper.terminate_connection(volume, connector)
 
@@ -1085,3 +1212,14 @@ class EMCVNXeDriver(san.SanDriver):
 
     def update_volume_stats(self):
         return self.helper.update_volume_stats()
+
+    def manage_existing_get_size(self, volume, existing_ref):
+        """Return size of volume to be managed by manage_existing.
+        """
+        return self.helper.manage_existing_get_size(
+            volume, existing_ref)
+
+    def manage_existing(self, volume, existing_ref):
+        LOG.debug("Reference lun id %s." % existing_ref['id'])
+        return self.helper.manage_existing(
+            volume, existing_ref)
