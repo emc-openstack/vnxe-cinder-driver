@@ -1,6 +1,6 @@
 # VNXe Cinder Driver
 
-Copyright (c) 2014 EMC Corporation.
+Copyright (c) 2014 - 2015 EMC Corporation.
 All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at
@@ -164,9 +164,8 @@ VNXe cinder driver supports FC SAN auto zoning when ZoneManager is configured. S
 
 ## Read-only Volumes
 
-OpenStack support read-only volumes. Either of the following commands can be used to set a volume read-only.
+OpenStack support read-only volumes. Administrators can use following command to set a volume as read-only.
 
-        cinder --os-username admin --os-tenant-name admin metadata <volume> set 'attached_mode'='ro'
-        cinder --os-username admin --os-tenant-name admin metadata <volume> set 'readonly'='True'
+        cinder --os-username admin --os-tenant-name admin readonly-mode-update <volume> True
 
 After a volume is marked as read-only, the driver will forward the information when a hypervisor is attaching the volume and the hypervisor will have implementation-specific way to make sure the volume is not written.
