@@ -1,4 +1,4 @@
-# Copyright (c) 2014 EMC Corporation.
+# Copyright (c) 2015 EMC Corporation.
 # All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -12,9 +12,9 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-'''
+"""
 Drivers for EMC VNXe array based on RESTful API.
-'''
+"""
 
 import cookielib
 import json
@@ -43,7 +43,7 @@ LOG = logging.getLogger(__name__)
 
 
 CONF = cfg.CONF
-VERSION = '00.02.00'
+VERSION = '00.03.00'
 
 GiB = 1024 * 1024 * 1024
 
@@ -60,7 +60,7 @@ CONF.register_opts(loc_opts)
 
 
 class EMCUnityRESTClient(object):
-    '''EMC Unity Client interface handing REST calls and responses.'''
+    """EMC Unity Client interface handing REST calls and responses."""
 
     HEADERS = {'Accept': 'application/json',
                'Content-Type': 'application/json',
@@ -69,7 +69,7 @@ class EMCUnityRESTClient(object):
                'X-EMC-REST-CLIENT': 'true',
                'User-agent': 'EMC-OpenStack'}
     HostTypeEnum_HostManual = 1
-    HostLUNTypeEnum_LUN = 2
+    HostLUNTypeEnum_LUN = 1
     HostLUNAccessEnum_NoAccess = 0
     HostLUNAccessEnum_Production = 1
 
@@ -371,10 +371,10 @@ class EMCUnityRESTClient(object):
     def get_snap_by_name(self, snap_name, fields=None):
         """Get the snap properties by name.
         """
-        return self._filter_by_field('lunSnap', 'name', snap_name, fields)
+        return self._filter_by_field('snap', 'name', snap_name, fields)
 
     def create_snap(self, lun_id, snap_name, snap_description=None):
-        create_snap_url = '/api/types/lunSnap/instances'
+        create_snap_url = '/api/types/snap/instances'
         req_data = {'storageResource': {'id': lun_id},
                     'name': snap_name}
         if snap_description:
@@ -384,9 +384,10 @@ class EMCUnityRESTClient(object):
             (err, resp['content']['id'])
 
     def delete_snap(self, snap_id):
-        """The function will delete the snap by the snap_id.
         """
-        delete_snap_url = '/api/instances/lunSnap/%s' % snap_id
+        The function will delete the snap by the snap_id.
+        """
+        delete_snap_url = '/api/instances/snap/%s' % snap_id
         err, resp = self._request(delete_snap_url, None, 'DELETE')
         return err, resp
 
@@ -507,7 +508,7 @@ class EMCUnityHelper(object):
         self.storage_username = self.configuration.san_login
         self.storage_password = self.configuration.san_password
         self.lookup_service_instance = None
-        #here we use group config to keep same as cinder manager
+        # Here we use group config to keep same as cinder manager
         zm_conf = Configuration(manager.volume_manager_opts)
         if (zm_conf.safe_get('zoning_mode') == 'fabric' or
                 self.configuration.safe_get('zoning_mode') == 'fabric'):
@@ -515,7 +516,6 @@ class EMCUnityHelper(object):
                 import FCSanLookupService
             self.lookup_service_instance = \
                 FCSanLookupService(configuration=self.configuration)
-
         self.client = EMCUnityRESTClient(self.active_storage_ip, 443,
                                          self.storage_username,
                                          self.storage_password,
@@ -860,7 +860,6 @@ class EMCUnityHelper(object):
 
     def expose_lun(self, volume, host_id):
         lun_id = self._extra_lun_or_snap_id(volume)
-
         if self.lookup_service_instance and self.storage_protocol == 'FC':
             @lockutils.synchronized('emc-vnxe-host-' + host_id,
                                     "emc-vnxe-host-", True)
@@ -870,7 +869,6 @@ class EMCUnityHelper(object):
             err, resp = _expose_lun()
         else:
             err, resp = self.client.expose_lun(lun_id, host_id)
-
         if err:
             print(resp)  # Get rid of warning
             if err['errorCode'] in (0x6701020,):
@@ -1036,7 +1034,6 @@ class EMCUnityHelper(object):
             raise exception.VolumeBackendAPIException(data=err['messages'])
 
     def get_fc_zone_info_for_empty_host(self, connector, host_id):
-
         @lockutils.synchronized('emc-vnxe-host-' + host_id,
                                 "emc-vnxe-host-", True)
         def _get_fc_zone_info_in_sync():
