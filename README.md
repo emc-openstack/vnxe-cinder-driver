@@ -22,7 +22,7 @@ This driver supports Juno release.
 
 ## Requirements
 
-* VNXe OE V3.0
+* VNXe OE V3.1.1
 * Fibre Channel Licence (if FC is to be used)
 * Internet Small Computer System Interface License (if iSCSI is to be used)
 * Thin Provisioning Licence
