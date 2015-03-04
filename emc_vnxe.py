@@ -384,8 +384,7 @@ class EMCUnityRESTClient(object):
             (err, resp['content']['id'])
 
     def delete_snap(self, snap_id):
-        """
-        The function will delete the snap by the snap_id.
+        """The function will delete the snap by the snap_id.
         """
         delete_snap_url = '/api/instances/snap/%s' % snap_id
         err, resp = self._request(delete_snap_url, None, 'DELETE')
