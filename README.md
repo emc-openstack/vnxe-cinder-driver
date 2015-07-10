@@ -18,7 +18,7 @@ EMCVNXeDriver performs the volume operations by Restful API management interface
 
 ## Supported OpenStack Release
 
-This driver supports Juno release.
+This driver supports Kilo release.
 
 ## Requirements
 
@@ -78,7 +78,7 @@ Following are the elements specific to EMC VNXe driver to be configured
         # storage protocol 
         storage_protocol = iSCSI
         # storage pool which the backend is going to manage
-        storage_pool_name = StoragePool00
+        storage_pool_names = StoragePool00, StoragePool01
         # VNXe management IP 
         san_ip = 192.168.1.58
         # VNXe username
@@ -96,7 +96,7 @@ Following are the elements specific to EMC VNXe driver to be configured
 
 
 * where `san_ip` is one of the Management IP address of the VNXe array.
-* where `storage_pool_name` is the pool user wants to create volume from. The pools can be created using Unisphere for VNXe.
+* where `storage_pool_names` is the comma separated pool names from which user wants to create volumes. The pools can be created using Unisphere for VNXe. This option is optional. Refer to the "Multiple Pools Support" for more details
 * Restart of cinder-volume service is needed to make the configuration change take effect.
 
 ## Authentication
@@ -105,6 +105,19 @@ VNXe credentials are needed so that the driver could talk with the VNXe array. C
 
 * Local user's san_login: Local/<username> or <username>
 * LDAP user's san_login: <LDAP Domain Name>/<username>
+
+## Multiple Pools Support
+
+Option `storage_pool_names` is used to specify which storage pool or pools of a VNXe system could be used by a Block Storage back end. To specify more than one pool, separate storage pool names with a comma.
+If `storage_pool_names` is not configured, the Block Storage back end uses all the pools on the VNXe array.  The scheduler will choose which pool to place the volume based on the capacities and capabilities of the pools when more than one pools are managed by a Block Storage back end.
+Note that the option 'storage_pool_name' has been deprecated, the user should use the option 'storage_pool_names' instead.
+
+When a Block Storage back end is managing more than one pool, if the user wants to create a volume on a certain storage pool, a volume type with an extra spec specified storage pool should be created first, then the user can use this volume type to create the volume.
+
+Here is an example about the volume type creation:
+
+        cinder type-create "HighPerf"
+        cinder type-key "HighPerf" set pool_name=Pool_02_SASFLASH volume_backend_name=vnxe_1
 
 ## Multi-backend configuration
 
@@ -115,7 +128,6 @@ VNXe credentials are needed so that the driver could talk with the VNXe array. C
         [backendA]
 
         storage_protocol = iSCSI
-        storage_pool_name = StoragePool00
         san_ip = 192.168.1.58
         san_login = Local/admin
         san_password = Password123!
@@ -124,7 +136,7 @@ VNXe credentials are needed so that the driver could talk with the VNXe array. C
 
         [backendB]
         storage_protocol = FC
-        storage_pool_name = StoragePool01
+        storage_pool_names = StoragePool01
         san_ip = 192.168.1.58
         san_login = Local/admin
         san_password = Password123!
@@ -169,3 +181,4 @@ OpenStack support read-only volumes. Administrators can use following command to
         cinder --os-username admin --os-tenant-name admin readonly-mode-update <volume> True
 
 After a volume is marked as read-only, the driver will forward the information when a hypervisor is attaching the volume and the hypervisor will have implementation-specific way to make sure the volume is not written.
+
