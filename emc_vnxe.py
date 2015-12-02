@@ -27,13 +27,15 @@ from oslo_concurrency import lockutils
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import timeutils
+import six
 import taskflow.engines
 from taskflow.patterns import linear_flow
 from taskflow import task
 from taskflow.utils import misc
 
 from cinder import exception
-from cinder.i18n import _, _LW
+from cinder.i18n import _, _LW, _LI, _LE
+from cinder import objects
 from cinder.volume.configuration import Configuration
 from cinder.volume.drivers.san import san
 from cinder.volume import manager
@@ -45,7 +47,7 @@ LOG = logging.getLogger(__name__)
 
 
 CONF = cfg.CONF
-VERSION = '00.04.00'
+VERSION = '00.05.00'
 
 GiB = 1024 * 1024 * 1024
 ENABLE_TRACE = False
@@ -160,10 +162,10 @@ class EMCVNXeRESTClient(object):
             return
         if failed_req:
             LOG.error(
-                _('REQ: [%(method)s] %(url)s %(req_hdrs)s\n'
-                  'REQ BODY: %(req_b)s\n'
-                  'RESP: [%(code)s] %(resp_hdrs)s\n'
-                  'RESP BODY: %(resp_b)s\n') %
+                _LE('REQ: [%(method)s] %(url)s %(req_hdrs)s\n'
+                    'REQ BODY: %(req_b)s\n'
+                    'RESP: [%(code)s] %(resp_hdrs)s\n'
+                    'RESP BODY: %(resp_b)s\n'),
                 {'method': failed_req.get_method(),
                  'url': failed_req.get_full_url(),
                  'req_hdrs': failed_req.headers,
@@ -180,10 +182,10 @@ class EMCVNXeRESTClient(object):
 
     def _http_log_err(self, err, req):
         LOG.error(
-            _('REQ: [%(method)s] %(url)s %(req_hdrs)s\n'
-              'REQ BODY: %(req_b)s\n'
-              'ERROR CODE: [%(code)s] \n'
-              'ERROR REASON: %(resp_e)s\n') %
+            _LE('REQ: [%(method)s] %(url)s %(req_hdrs)s\n'
+                'REQ BODY: %(req_b)s\n'
+                'ERROR CODE: [%(code)s] \n'
+                'ERROR REASON: %(resp_e)s\n'),
             {'method': req.get_method(),
              'url': req.get_full_url(),
              'req_hdrs': req.headers,
@@ -215,14 +217,14 @@ class EMCVNXeRESTClient(object):
                 else:
                     err = {'errorCode': -1,
                            'httpStatusCode': http_err.code,
-                           'messages': str(http_err),
+                           'messages': six.text_type(http_err),
                            'request': req}
             else:
                 self._http_log_err(http_err, req)
                 resp_data = http_err.reason
                 err = {'errorCode': -1,
                        'httpStatusCode': http_err.code,
-                       'messages': str(http_err),
+                       'messages': six.text_type(http_err),
                        'request': req}
 
             if not return_rest_err:
@@ -238,9 +240,9 @@ class EMCVNXeRESTClient(object):
                       conditions)
         filter_str = ' and '.join(filters)
         filter_str = urllib2.quote(filter_str)
-        get_by_fields_url =\
-            '/api/types/%(category)s/instances?filter=%(filter)s'\
-            % {'category': category, 'filter': filter_str}
+        get_by_fields_url = (
+            '/api/types/%(category)s/instances?filter=%(filter)s' %
+            {'category': category, 'filter': filter_str})
         if fields:
             get_by_fields_url += '&fields=%s' % \
                 (','.join(map(urllib2.quote, fields)))
@@ -278,6 +280,10 @@ class EMCVNXeRESTClient(object):
     def get_pool_by_id(self, pool_id, fields=None):
         return self._filter_by_id('pool', pool_id, fields)
 
+    def get_group_by_name(self, group_name, fields=None):
+        return self._filter_by_field('storageResource', 'name',
+                                     group_name, fields)
+
     def get_lun_by_name(self, lun_name, fields=None):
         return self._filter_by_field('lun', 'name', lun_name, fields)
 
@@ -286,6 +292,36 @@ class EMCVNXeRESTClient(object):
 
     def get_basic_system_info(self, fields=None):
         return self._get_all('basicSystemInfo', fields)
+
+    def get_licenses(self, fields=None):
+        return self._get_all('license', fields)
+
+    def create_consistencygroup(self, group_id):
+        cg_create_url = '/api/types/storageResource/action/createLunGroup'
+        req_data = {'name': group_id}
+        err, resp = self._request(cg_create_url, req_data)
+        return (err, None) if err else (err,
+                                        resp['content']['storageResource'])
+
+    def delete_consistencygroup(self, group_id, force_snap_deletion=False):
+        cg_delete_url = '/api/instances/storageResource/%s' % group_id
+        data = {'forceSnapDeletion': force_snap_deletion}
+        err, resp = self._request(cg_delete_url, data, 'DELETE')
+        return err, resp
+
+    def update_consistencygroup(self, group_id, add_luns=None,
+                                remove_luns=None):
+        cg_update_url = (
+            '/api/instances/storageResource/%s/action/modifyLunGroup' %
+            group_id)
+        add_data = [{"lun": {"id": add_id}}
+                    for add_id in add_luns] if add_luns else []
+        remove_data = [{"lun": {"id": remove_id}}
+                       for remove_id in remove_luns] if remove_luns else []
+        req_data = {'lunAdd': add_data,
+                    'lunRemove': remove_data}
+        err, resp = self._request(cg_update_url, req_data)
+        return err, resp
 
     def create_lun(self, pool_id, name, size, **kwargs):
         lun_create_url = '/api/types/storageResource/action/createLun'
@@ -380,7 +416,7 @@ class EMCVNXeRESTClient(object):
     def get_fc_ports(self, fields=None):
         return self._get_all('fcPort', fields)
 
-    def expose_lun(self, lun_id, current_host_access, host_id):
+    def expose_lun(self, lun_id, lun_cg, current_host_access, host_id):
         lun_modify_url = (
             '/api/instances/storageResource/%s/action/modifyLun' % lun_id)
         host_access_list = current_host_access if current_host_access else []
@@ -389,11 +425,18 @@ class EMCVNXeRESTClient(object):
         host_access_list.append(
             {'host': {'id': host_id},
              'accessMask': self.HostLUNAccessEnum_Production})
-        data = {'lunParameters': {'hostAccess': host_access_list}}
+        if lun_cg:
+            lun_modify_url = (
+                '/api/instances/storageResource/%s/action/modifyLunGroup' % lun_cg)
+            data = {"lunModify": [
+                {'lun': {'id': lun_id},
+                 'lunParameters': {'hostAccess': host_access_list}}]}
+        else:
+            data = {'lunParameters': {'hostAccess': host_access_list}}
         err, resp = self._request(lun_modify_url, data)
         return err, resp
 
-    def hide_lun(self, lun_id, current_host_access, host_id):
+    def hide_lun(self, lun_id, lun_cg, current_host_access, host_id):
         lun_modify_url = (
             '/api/instances/storageResource/%s/action/modifyLun' % lun_id)
 
@@ -403,13 +446,19 @@ class EMCVNXeRESTClient(object):
         host_access_list.append(
             {'host': {'id': host_id},
              'accessMask': self.HostLUNAccessEnum_NoAccess})
-        data = {'lunParameters': {'hostAccess': host_access_list}}
+        if lun_cg:
+            lun_modify_url = (
+                '/api/instances/storageResource/%s/action/modifyLunGroup' % lun_cg)
+            data = {"lunModify": [
+                {'lun': {'id': lun_id},
+                 'lunParameters': {'hostAccess': host_access_list}}]}
+        else:
+            data = {'lunParameters': {'hostAccess': host_access_list}}
         err, resp = self._request(lun_modify_url, data)
         return err, resp
 
     def get_snap_by_name(self, snap_name, fields=None):
-        """Get the snap properties by name.
-        """
+        """Gets the snap properties by name."""
         return self._filter_by_field('snap', 'name', snap_name, fields)
 
     def create_snap(self, lun_id, snap_name, snap_description=None):
@@ -423,8 +472,7 @@ class EMCVNXeRESTClient(object):
             (err, resp['content']['id'])
 
     def delete_snap(self, snap_id):
-        """The function will delete the snap by the snap_id.
-        """
+        """Deletes the snap by the snap_id."""
         delete_snap_url = '/api/instances/snap/%s' % snap_id
         err, resp = self._request(delete_snap_url, None, 'DELETE')
         return err, resp
@@ -443,10 +491,9 @@ class EMCVNXeRESTClient(object):
         err, resp = self._request(lun_modify_url, data)
         if err:
             if err['errorCode'] in (0x6701020,):
-                msg = (_('Nothing to modify, the lun %(lun)s '
-                       'already has the name %(name)s.') %
-                       {'lun': lun_id, 'name': new_name})
-                LOG.warn(msg)
+                LOG.warning(_LW('Nothing to modify, the lun %(lun)s '
+                                'already has the name %(name)s.'),
+                            {'lun': lun_id, 'name': new_name})
             else:
                 reason = (_('Manage existing lun failed. Can not '
                           'rename the lun %(lun)s to %(name)s') %
@@ -470,33 +517,34 @@ class ArrangeHostTask(task.Task):
 
 
 class ExposeLUNTask(task.Task):
-    def __init__(self, helper, lun_data):
+    def __init__(self, helper, volume, lun_data):
         LOG.debug('ExposeLUNTask.__init__ %s', lun_data)
         super(ExposeLUNTask, self).__init__()
         self.helper = helper
         self.lun_data = lun_data
+        self.volume = volume
 
     def execute(self, host_id):
         LOG.debug('ExposeLUNTask.execute %(vol)s %(host)s'
                   % {'vol': self.lun_data,
                      'host': host_id})
-        self.helper.expose_lun(self.lun_data, host_id)
+        self.helper.expose_lun(self.volume, self.lun_data, host_id)
 
     def revert(self, result, host_id, *args, **kwargs):
-        LOG.warn(_('ExposeLUNTask.revert %(vol)s %(host)s') %
-                 {'vol': self.lun_data, 'host': host_id})
+        LOG.warning(_LW('ExposeLUNTask.revert %(vol)s %(host)s'),
+                    {'vol': self.lun_data, 'host': host_id})
         if isinstance(result, misc.Failure):
-            LOG.warn(_('ExposeLUNTask.revert: Nothing to revert'))
+            LOG.warning(_LW('ExposeLUNTask.revert: Nothing to revert'))
             return
         else:
-            LOG.warn(_('ExposeLUNTask.revert: hide_lun'))
-            self.helper.hide_lun(self.lun_data, host_id)
+            LOG.warning(_LW('ExposeLUNTask.revert: hide_lun'))
+            self.helper.hide_lun(self.volume, self.lun_data, host_id)
 
 
 class GetConnectionInfoTask(task.Task):
 
     def __init__(self, helper, volume, lun_data, connector, *argv, **kwargs):
-        LOG.debug('GetConnectionInfoTask.__init__ %(vol)s %(conn)s' %
+        LOG.debug('GetConnectionInfoTask.__init__ %(vol)s %(conn)s',
                   {'vol': lun_data, 'conn': connector})
         super(GetConnectionInfoTask, self).__init__(provides='connection_info')
         self.helper = helper
@@ -505,9 +553,9 @@ class GetConnectionInfoTask(task.Task):
         self.volume = volume
 
     def execute(self, host_id):
-        LOG.debug('GetConnectionInfoTask.execute %(vol)s %(conn)s %(host)s'
-                  % {'vol': self.lun_data, 'conn': self.connector,
-                     'host': host_id})
+        LOG.debug('GetConnectionInfoTask.execute %(vol)s %(conn)s %(host)s',
+                  {'vol': self.lun_data, 'conn': self.connector,
+                   'host': host_id})
         return self.helper.get_connection_info(self.volume,
                                                self.connector,
                                                self.lun_data['currentNode'],
@@ -526,8 +574,9 @@ class EMCVNXeHelper(object):
              'vendor_name': 'EMC',
              'volume_backend_name': None}
 
-    LUN_NOT_EXISTED_ERROR = 131149829
     LUN_NOT_MODIFY_ERROR = 108007456
+    RESOURCE_ALREADY_EXIST = 108007952
+    RESOURCE_DOES_NOT_EXIST = 131149829
 
     def __init__(self, conf):
         self.configuration = conf
@@ -537,14 +586,16 @@ class EMCVNXeHelper(object):
         self.supported_storage_protocols = ('iSCSI', 'FC')
         if self.storage_protocol not in self.supported_storage_protocols:
             msg = _('storage_protocol %(invalid)s is not supported. '
-                    'The valid one should be among %(valid)s.') %\
-                {'invalid': self.storage_protocol,
-                 'valid': self.supported_storage_protocols}
+                    'The valid one should be among %(valid)s.') % {
+                'invalid': self.storage_protocol,
+                'valid': self.supported_storage_protocols}
             LOG.error(msg)
             raise exception.VolumeBackendAPIException(data=msg)
         self.active_storage_ip = self.configuration.san_ip
         self.storage_username = self.configuration.san_login
         self.storage_password = self.configuration.san_password
+        self.max_over_subscription_ratio = (
+            self.configuration.max_over_subscription_ratio)
         self.lookup_service_instance = None
         # Here we use group config to keep same as cinder manager
         zm_conf = Configuration(manager.volume_manager_opts)
@@ -570,6 +621,7 @@ class EMCVNXeHelper(object):
         self.is_managing_all_pools = False if conf_pools else True
         self.storage_pools_map = self._get_managed_storage_pools_map(
             conf_pools)
+        self.thin_enabled = False
         self.storage_targets = self._get_storage_targets()
 
     def _get_managed_storage_pools_map(self, pools):
@@ -626,8 +678,7 @@ class EMCVNXeHelper(object):
                         portal['id'])
                 res[sp].append(item)
             else:
-                msg = _('SP of %s is unknown') % portal['id']
-                LOG.warn(msg)
+                LOG.warning(_LW('SP of %s is unknown'), portal['id'])
         return res
 
     def _get_fc_targets(self):
@@ -645,8 +696,7 @@ class EMCVNXeHelper(object):
                 item = (node_wwn, port_wwn, port['id'])
                 res[sp].append(item)
             else:
-                msg = _('SP of %s is unknown') % port['id']
-                LOG.warn(msg)
+                LOG.warning(_LW('SP of %s is unknown'), port['id'])
         return res
 
     def _get_storage_targets(self):
@@ -694,6 +744,133 @@ class EMCVNXeHelper(object):
         name = self._get_target_storage_pool_name(volume)
         return self.storage_pools_map[name]
 
+    def _get_group_id_by_name(self, group_name, raise_exp_flag=True):
+        """Gets the group id by the group name."""
+        group_id = self.client.get_group_by_name(group_name, {'id'})
+        if not group_id:
+            msg = (_('Failed to get ID for Consistency Group %s') %
+                   group_name)
+            if raise_exp_flag:
+                raise exception.VolumeBackendAPIException(data=msg)
+            else:
+                LOG.warning(_LW('%s'), msg)
+                return None
+        return group_id[0]['id']
+
+    def _get_snap_id_by_name(self, snap_name, raise_exp_flag=True):
+        """Gets the snap id by the snap name."""
+        snap_id = self.client.get_snap_by_name(snap_name, {'id'})
+        if not snap_id:
+            msg = (_('Failed to get ID for Snapshot %s') %
+                   snap_name)
+            if raise_exp_flag:
+                raise exception.VolumeBackendAPIException(data=msg)
+            else:
+                LOG.warning(_LW('%s'), msg)
+                return None
+        return snap_id[0]['id']
+
+    def _consistencygroup_creation_check(self, group):
+        """Check extra spec for consistency group."""
+        if group.get('volume_type_id') is not None:
+            for id in group['volume_type_id'].split(","):
+                if id:
+                    provisioning = (
+                        volume_types.get_volume_type_extra_specs(id)
+                        ['storagetype:provisioning'])
+                    if provisioning == 'compressed':
+                        msg = _("Failed to create consistency group %s "
+                                "because VNXe consistency group cannot "
+                                "accept compressed LUNs as members."
+                                ) % group['id']
+                        raise exception.VolumeBackendAPIException(data=msg)
+
+    def create_consistencygroup(self, group):
+        """Creates a consistency group."""
+        self._consistencygroup_creation_check(group)
+        cg_id = group.id
+        model_update = {'status': 'available'}
+        err, res = self.client.create_consistencygroup(cg_id)
+        if err:
+            # Ignore the error if CG already exist
+            if err['errorCode'] == self.RESOURCE_ALREADY_EXIST:
+                LOG.warning(_LW('CG %s with this name already exists'),
+                            cg_id)
+            else:
+                raise exception.VolumeBackendAPIException(data=err['messages'])
+        return model_update
+
+    def delete_consistencygroup(self, group, volumes):
+        """Deletes a consistency group."""
+        cg_id = self._get_group_id_by_name(group.id, False)
+        model_update = {'status': group.status}
+        if cg_id is not None:
+            err, res = self.client.delete_consistencygroup(cg_id)
+            if err:
+                # Ignore the error if CG doesn't exist
+                if err['errorCode'] == self.RESOURCE_DOES_NOT_EXIST:
+                    LOG.warning(
+                        _LW("CG %(cg_name)s does not exist."),
+                        {'cg_name': cg_id, 'msg': err['messages']})
+                else:
+                    raise exception.VolumeBackendAPIException(
+                        data=err['messages'])
+        for volume in volumes:
+                volume['status'] = 'deleted'
+        return model_update, volumes
+
+    def update_consistencygroup(self, group, add_volumes, remove_volumes):
+        """Adds or removes LUN(s) to/from an existing consistency group"""
+        model_update = {'status': 'available'}
+        cg_id = self._get_group_id_by_name(group.id)
+        add_luns = [six.text_type(self._extra_lun_or_snap_id(vol))
+                    for vol in add_volumes] if add_volumes else []
+        remove_luns = [six.text_type(self._extra_lun_or_snap_id(vol))
+                       for vol in remove_volumes] if remove_volumes else []
+        err, res = self.client.update_consistencygroup(cg_id, add_luns,
+                                                       remove_luns)
+        if err:
+            raise exception.VolumeBackendAPIException(data=err['messages'])
+        return model_update, None, None
+
+    def create_cgsnapshot(self, cgsnapshot, snapshots):
+        """Creates a cgsnapshot (snap group)."""
+        cg_name = self._get_group_id_by_name(cgsnapshot['consistencygroup_id'])
+        snap_name = cgsnapshot['id']
+        snap_desc = cgsnapshot['description']
+        err, res = self.client.create_snap(cg_name, snap_name, snap_desc)
+        if err:
+            # Ignore the error if CG Snapshot already exists
+            if err['errorCode'] == self.RESOURCE_ALREADY_EXIST:
+                LOG.warning(
+                    _LW('CG Snapshot %s with this name already exists'),
+                    snap_name)
+            else:
+                raise exception.VolumeBackendAPIException(data=err['messages'])
+        model_update = {'status': cgsnapshot['status']}
+        for snapshot in snapshots:
+            snapshot['status'] = 'available'
+        return model_update, snapshots
+
+    def delete_cgsnapshot(self, cgsnapshot, snapshots):
+        """Deletes a cgsnapshot (snap group)."""
+        snap_id = self._get_snap_id_by_name(cgsnapshot['id'], False)
+        model_update = {'status': cgsnapshot['status']}
+        if snap_id is not None:
+            err, resp = self.client.delete_snap(snap_id)
+            if err:
+                # Ignore the error if CG Snapshot doesn't exist
+                if err['errorCode'] == self.RESOURCE_DOES_NOT_EXIST:
+                    LOG.warning(
+                        _LW("CG Snapshot %(cg_name)s does not exist."),
+                        {'cg_name': snap_id, 'msg': err['messages']})
+                else:
+                    raise exception.VolumeBackendAPIException(
+                        data=err['messages'])
+        for snapshot in snapshots:
+            snapshot['status'] = 'deleted'
+        return model_update, snapshots
+
     def create_volume(self, volume):
         name = volume['name']
         size = volume['size'] * GiB
@@ -715,6 +892,14 @@ class EMCVNXeHelper(object):
             is_thin=is_thin)
         if err:
             raise exception.VolumeBackendAPIException(data=err['messages'])
+
+        if volume.get('consistencygroup_id'):
+            cg_id = (
+                self._get_group_id_by_name(volume.get('consistencygroup_id')))
+            err, res = self.client.update_consistencygroup(cg_id, [lun['id']])
+            if err:
+                raise exception.VolumeBackendAPIException(data=err['messages'])
+
         pl_dict = {'system': self.storage_serial_number,
                    'type': 'lun',
                    'id': lun['id']}
@@ -753,8 +938,8 @@ class EMCVNXeHelper(object):
         if 'lun' == res_type or 'snap' == res_type:
             if pl_dict.get('id', None):
                 return pl_dict['id']
-        msg = _('Fail to find LUN ID of %(vol)s in from %(pl)s') % \
-            {'vol': volume['name'], 'pl': volume['provider_location']}
+        msg = _('Fail to find LUN ID of %(vol)s in from %(pl)s') % {
+            'vol': volume['name'], 'pl': volume['provider_location']}
         LOG.error(msg)
         raise exception.VolumeBackendAPIException(data=msg)
 
@@ -762,18 +947,15 @@ class EMCVNXeHelper(object):
         lun_id = self._extra_lun_or_snap_id(volume)
         err, resp = self.client.delete_lun(lun_id)
         if err:
-            if (err['httpStatusCode'] == 404 and
-                    err['errorCode'] == self.LUN_NOT_EXISTED_ERROR):
-                LOG.warn(_("LUN %(name)s is already deleted. "
-                           "Message: %(msg)s"),
-                         {'name': volume['name'], 'msg': err['messages']})
+            if not self.client.get_lun_by_id(lun_id):
+                LOG.warning(_LW("LUN %(name)s is already deleted or does not "
+                                "exist. Message: %(msg)s"),
+                            {'name': volume['name'], 'msg': err['messages']})
             else:
                 raise exception.VolumeBackendAPIException(data=err['messages'])
 
     def create_snapshot(self, snapshot, name, snap_desc):
-        """This function will create a snapshot of the given
-        volume.
-        """
+        """This function will create a snapshot of the given volume."""
         LOG.debug('Entering EMCVNXeHelper.create_snapshot.')
         lun_id = self._extra_lun_or_snap_id(snapshot['volume'])
         if not lun_id:
@@ -794,9 +976,7 @@ class EMCVNXeHelper(object):
             return model_update
 
     def delete_snapshot(self, snapshot):
-        """This function will get the snap id by the snap name
-        and delete the snapshot.
-        """
+        """Gets the snap id by the snap name and delete the snapshot."""
         snap_id = self._extra_lun_or_snap_id(snapshot)
         if not snap_id:
             return
@@ -809,8 +989,9 @@ class EMCVNXeHelper(object):
         err, resp = self.client.extend_lun(lun_id, new_size * GiB)
         if err:
             if err['errorCode'] == self.LUN_NOT_MODIFY_ERROR:
-                LOG.warn(_("Lun %(lun)s is already expanded. Message: %(msg)s")
-                         % {'lun': volume['name'], 'msg': err['messages']})
+                LOG.warning(
+                    _LW("Lun %(lun)s is already expanded. Message: %(msg)s"),
+                    {'lun': volume['name'], 'msg': err['messages']})
             else:
                 raise exception.VolumeBackendAPIException(data=err['messages'])
 
@@ -878,8 +1059,8 @@ class EMCVNXeHelper(object):
                                                           host_id)
             if err:
                 if err['httpStatusCode'] in (409,):
-                    msg = _('Initiator %s had been created.') % initiator_uid
-                    LOG.warn(msg)
+                    LOG.warning(_LW('Initiator %s had been created.'),
+                                initiator_uid)
                     return
                 msg = _('Failed to create initiator %s') % initiator_uid
                 LOG.error(msg)
@@ -891,9 +1072,8 @@ class EMCVNXeHelper(object):
                                                        host_id)
             if err:
                 msg = _('Failed to register initiator %(initiator)s '
-                        'to %(host)s') %\
-                    {'initiator': initiator['id'],
-                     'host': host_id}
+                        'to %(host)s') % {'initiator': initiator['id'],
+                                          'host': host_id}
                 LOG.error(msg)
                 raise exception.VolumeBackendAPIException(data=msg)
 
@@ -940,30 +1120,33 @@ class EMCVNXeHelper(object):
         self._register_initiators(orphan_initiators, host_id)
         return host_id
 
-    def expose_lun(self, lun_data, host_id):
+    def expose_lun(self, volume, lun_data, host_id):
         lun_id = lun_data['id']
+        lun_cg = (self._get_group_id_by_name(volume.get('consistencygroup_id'))
+                  if volume.get('consistencygroup_id') else None)
         host_access = (lun_data['hostAccess'] if 'hostAccess' in lun_data
                        else [])
         if self.lookup_service_instance and self.storage_protocol == 'FC':
             @lockutils.synchronized('emc-vnxe-host-' + host_id,
                                     "emc-vnxe-host-", True)
             def _expose_lun():
-                return self.client.expose_lun(lun_data['id'],
+                return self.client.expose_lun(lun_id,
+                                              lun_cg,
                                               host_access,
                                               host_id)
 
             err, resp = _expose_lun()
         else:
-            err, resp = self.client.expose_lun(lun_data['id'],
+            err, resp = self.client.expose_lun(lun_id,
+                                               lun_cg,
                                                host_access,
                                                host_id)
         if err:
             if err['errorCode'] in (0x6701020,):
-                msg = _('LUN %(lun)s backing %(vol)s had been '
-                        'exposed to %(host)s.') % \
-                    {'lun': lun_id, 'vol': lun_data['name'],
-                     'host': host_id}
-                LOG.warn(msg)
+                LOG.warning(_LW('LUN %(lun)s backing %(vol)s had been '
+                            'exposed to %(host)s.'),
+                            {'lun': lun_id, 'vol': lun_data['name'],
+                             'host': host_id})
                 return
             msg = _('Failed to expose %(lun)s to %(host)s.') % \
                 {'lun': lun_id, 'host': host_id}
@@ -1009,16 +1192,25 @@ class EMCVNXeHelper(object):
                     'because no target ports are available in the system.')
             LOG.error(msg)
             raise exception.VolumeBackendAPIException(data=msg)
+        host_lun = self.client.get_host_lun_by_ends(host_id, lun_id,
+                                                    fields=('hlu',))
+        if not host_lun or 'hlu' not in host_lun[0]:
+            msg = _('Can not get the hlu information of host %s.') % host_id
+            LOG.error(msg)
+            raise exception.VolumeBackendAPIException(data=msg)
+        data['target_lun'] = host_lun[0]['hlu']
         if self.storage_protocol == 'iSCSI':
             data['target_iqn'] = targets[0][0]
             data['target_portal'] = '%s:3260' % targets[0][1]
+            data['target_iqns'] = [t[0] for t in targets]
+            data['target_portals'] = ['%s:3260' % t[1] for t in targets]
+            data['target_luns'] = [host_lun[0]['hlu']] * len(targets)
         elif self.storage_protocol == 'FC':
             host = self.client.get_host_by_id(host_id,
                                               ('fcHostInitiators',))
             if not host or not host[0]['fcHostInitiators']:
                 msg = _('Connection information is unavailable because '
-                        'no FC initiator can access resources in %s') % \
-                    host_id
+                        'no FC initiator can access resources in %s') % host_id
                 LOG.error(msg)
                 raise exception.VolumeBackendAPIException(data=msg)
             host = host[0]
@@ -1048,14 +1240,6 @@ class EMCVNXeHelper(object):
                       % {'host': connector['host'],
                          'targets': data['target_wwn']})
 
-        host_lun = self.client.get_host_lun_by_ends(host_id, lun_id,
-                                                    fields=('hlu',))
-        if not host_lun or 'hlu' not in host_lun[0]:
-            msg = _('Can not get the hlu information of host %s.') % host_id
-            LOG.error(msg)
-            raise exception.VolumeBackendAPIException(data=msg)
-        data['target_lun'] = host_lun[0]['hlu']
-
         connection_info = {
             'driver_volume_type': self._get_driver_volume_type(),
             'data': data}
@@ -1067,7 +1251,7 @@ class EMCVNXeHelper(object):
         lun_id = self._extra_lun_or_snap_id(volume)
         lun_data = self.get_lun_by_id(lun_id)
         volume_flow.add(ArrangeHostTask(self, connector),
-                        ExposeLUNTask(self, lun_data),
+                        ExposeLUNTask(self, volume, lun_data),
                         GetConnectionInfoTask(self, volume, lun_data,
                                               connector))
 
@@ -1076,20 +1260,22 @@ class EMCVNXeHelper(object):
         flow_engine.run()
         return json.loads(flow_engine.storage.fetch('connection_info'))
 
-    def hide_lun(self, lun_data, host_id):
+    def hide_lun(self, volume, lun_data, host_id):
         lun_id = lun_data['id']
+        lun_cg = (self._get_group_id_by_name(volume.get('consistencygroup_id'))
+                  if volume.get('consistencygroup_id') else None)
         host_access = (lun_data['hostAccess'] if 'hostAccess' in lun_data
                        else [])
         err, resp = self.client.hide_lun(lun_id,
+                                         lun_cg,
                                          host_access,
                                          host_id)
         if err:
             if err['errorCode'] in (0x6701020,):
-                msg = _('LUN %(lun)s backing %(vol) had been '
-                        'hidden from %(host)s.') % \
-                    {'lun': lun_id, 'vol': lun_data['name'],
-                     'host': host_id}
-                LOG.warn(msg)
+                LOG.warning(_LW('LUN %(lun)s backing %(vol) had been '
+                                'hidden from %(host)s.'), {
+                            'lun': lun_id, 'vol': lun_data['name'],
+                            'host': host_id})
                 return
             msg = _('Failed to hide %(vol)s from host %(host)s '
                     ': %(msg)s.') % {'vol': lun_data['name'],
@@ -1117,11 +1303,10 @@ class EMCVNXeHelper(object):
         host_id = self._extract_host_id(registered_initiators,
                                         connector['host'])
         if not host_id:
-            msg = _("Host using %s is not found.") % volume['name']
-            LOG.warn(msg)
+            LOG.warning(_LW("Host using %s is not found."), volume['name'])
         else:
             lun_data = self.get_lun_by_id(lun_id)
-            self.hide_lun(lun_data, host_id)
+            self.hide_lun(volume, lun_data, host_id)
 
         if self.lookup_service_instance and self.storage_protocol == 'FC':
             return self.get_fc_zone_info_for_empty_host(connector, host_id)
@@ -1143,19 +1328,26 @@ class EMCVNXeHelper(object):
 
     def update_volume_stats(self):
         LOG.debug("Updating volume stats")
+        # Check if thin provisioning license is installed
+        licenses = self.client.get_licenses(('id', 'isValid'))
+        thin_license = filter(lambda lic: (lic['id'] == 'VNXE_PROVISION'
+                                           and lic['isValid'] is True),
+                              licenses)
+        if thin_license:
+            self.thin_enabled = True
         data = {}
         backend_name = self.configuration.safe_get('volume_backend_name')
         data['volume_backend_name'] = backend_name or 'EMCVNXeDriver'
         data['storage_protocol'] = self.storage_protocol
         data['driver_version'] = VERSION
         data['vendor_name'] = "EMC"
-        pools = self.client.get_pools(('name', 'sizeTotal', 'sizeFree', 'id'))
+        pools = self.client.get_pools(('name', 'sizeTotal', 'sizeFree',
+                                       'id', 'sizeSubscribed'))
         if not self.is_managing_all_pools:
             pools = filter(lambda a: a['name'] in self.storage_pools_map,
                            pools)
         else:
             self.storage_pools_map = self._build_storage_pool_id_map(pools)
-
         data['pools'] = map(
             lambda po: self._build_pool_stats(po), pools)
         self.stats = data
@@ -1168,13 +1360,17 @@ class EMCVNXeHelper(object):
             'pool_name': pool['name'],
             'free_capacity_gb': pool['sizeFree'] / GiB,
             'total_capacity_gb': pool['sizeTotal'] / GiB,
-            'reserved_percentage': 0
+            'provisioned_capacity_gb': pool['sizeSubscribed'] / GiB,
+            'reserved_percentage': 0,
+            'thin_provisioning_support': self.thin_enabled,
+            'thick_provisioning_support': True,
+            'consistencygroup_support': True,
+            'max_over_subscription_ratio': self.max_over_subscription_ratio
         }
         return pool_stats
 
     def manage_existing_get_size(self, volume, ref):
-        """Return size of volume to be managed by manage_existing.
-        """
+        """Return size of volume to be managed by manage_existing."""
         if 'source-id' in ref:
             lun = self.client.get_lun_by_id(ref['source-id'])
         elif 'source-name' in ref:
@@ -1198,8 +1394,7 @@ class EMCVNXeHelper(object):
         return lun[0]['sizeTotal'] / GiB
 
     def manage_existing(self, volume, ref):
-        """Manage an existing lun in the array.
-        """
+        """Manage an existing lun in the array."""
         if 'source-id' in ref:
             lun_id = ref['source-id']
         elif 'source-name' in ref:
@@ -1230,6 +1425,28 @@ class EMCVNXeDriver(san.SanDriver):
     def check_for_setup_error(self):
         pass
 
+    def create_consistencygroup(self, context, group):
+        return self.helper.create_consistencygroup(group)
+
+    def delete_consistencygroup(self, context, group):
+        volumes = self.db.volume_get_all_by_group(context, group.id)
+        return self.helper.delete_consistencygroup(group, volumes)
+
+    def update_consistencygroup(self, context, group,
+                                add_volumes=None, remove_volumes=None):
+        return self.helper.update_consistencygroup(group,
+                                                   add_volumes, remove_volumes)
+
+    def create_cgsnapshot(self, context, cgsnapshot):
+        snapshots = objects.SnapshotList().get_all_for_cgsnapshot(
+            context, cgsnapshot['id'])
+        return self.helper.create_cgsnapshot(cgsnapshot, snapshots)
+
+    def delete_cgsnapshot(self, context, cgsnapshot):
+        snapshots = objects.SnapshotList().get_all_for_cgsnapshot(
+            context, cgsnapshot['id'])
+        return self.helper.delete_cgsnapshot(cgsnapshot, snapshots)
+
     def create_volume(self, volume):
         return self.helper.create_volume(volume)
 
@@ -1249,29 +1466,16 @@ class EMCVNXeDriver(san.SanDriver):
         volumename = snapshot['volume_name']
         snap_desc = snapshot['display_description']
 
-        LOG.info(_('Create snapshot: %(snapshot)s: volume: %(volume)s')
-                 % {'snapshot': snapshotname,
-                    'volume': volumename})
+        LOG.info(_LI('Create snapshot: %(snapshot)s: volume: %(volume)s'),
+                 {'snapshot': snapshotname, 'volume': volumename})
 
         return self.helper.create_snapshot(
             snapshot, snapshotname, snap_desc)
 
     def delete_snapshot(self, snapshot):
         """Delete a snapshot."""
-        LOG.info(_('Delete snapshot: %s') % snapshot['name'])
+        LOG.info(_LI('Delete snapshot: %s'), snapshot['name'])
         return self.helper.delete_snapshot(snapshot)
-
-    def ensure_export(self, context, volume):
-        pass
-
-    def create_export(self, context, volume):
-        pass
-
-    def remove_export(self, context, volume):
-        pass
-
-    def check_for_export(self, context, volume_id):
-        pass
 
     def extend_volume(self, volume, new_size):
         return self.helper.extend_volume(volume, new_size)
@@ -1291,8 +1495,7 @@ class EMCVNXeDriver(san.SanDriver):
         return self.helper.update_volume_stats()
 
     def manage_existing_get_size(self, volume, existing_ref):
-        """Return size of volume to be managed by manage_existing.
-        """
+        """Return size of volume to be managed by manage_existing."""
         return self.helper.manage_existing_get_size(
             volume, existing_ref)
 

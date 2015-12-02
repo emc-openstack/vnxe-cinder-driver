@@ -18,7 +18,7 @@ EMCVNXeDriver performs the volume operations by Restful API management interface
 
 ## Supported OpenStack Release
 
-This driver supports Kilo release.
+This driver supports Liberty release.
 
 ## Requirements
 
@@ -46,6 +46,9 @@ The following operations will be supported by VNXe Cinder Driver:
 * Delete snapshot
 * Copy Image to Volume
 * Copy Volume to Image
+* Create and delete consistency groups
+* Create, list, and delete consistency group snapshots
+* Modify consistency groups
 
 ## Preparation
 
@@ -182,3 +185,10 @@ OpenStack support read-only volumes. Administrators can use following command to
 
 After a volume is marked as read-only, the driver will forward the information when a hypervisor is attaching the volume and the hypervisor will have implementation-specific way to make sure the volume is not written.
 
+## Over subscription in thin provisioning
+
+Over subscription allows that the sum of all volumes' capacity (provisioned capacity) to be larger than the pool's total capacity.
+
+`max_over_subscription_ratio` in the back-end section is the ratio of provisioned capacity over total capacity.
+
+The default value of `max_over_subscription_ratio` is 20.0, which means the provisioned capacity can be 20 times of the total capacity. If the value of this ratio is set larger than 1.0, the provisioned capacity can exceed the total capacity.
