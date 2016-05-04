@@ -12,17 +12,18 @@ See the License for the specific language governing permissions and limitations 
 
 ## Overview
 
-EMCVNXeDriver (a.k.a. VNXe Cinder Driver) is based on the SanDriver defined in Cinder, with the ability to create/delete, attach/detach volumes, create/delete snapshots, etc. 
+EMCVNXeDriver (a.k.a. VNXe Cinder Driver) is based on the SanDriver defined in Cinder, with the ability to create/delete, attach/detach volumes, create/delete snapshots, etc.
 
 EMCVNXeDriver performs the volume operations by Restful API management interface. 
 
 ## Supported OpenStack Release
 
-This driver supports Liberty release.
+This driver supports Mitaka release.
 
 ## Requirements
 
 * VNXe3200 with OE V3.1.1
+* Unity with OE V4.0.x
 * Fibre Channel Licence (if FC is to be used)
 * Internet Small Computer System Interface License (if iSCSI is to be used)
 * Thin Provisioning Licence
@@ -57,20 +58,20 @@ The following operations will be supported by VNXe Cinder Driver:
 VNXe Cinder Driver (EMCVNXeDriver) is provided in the installer package consists of one python file:
 
         emc_vnxe.py
-                                
+
 Copy the above python file to the `cinder/volume/drivers/emc/` directory of your OpenStack node(s) where cinder-volume is running.
 
 ### San Connection
 
-To access the storage of VNXe array, OpenStack nodes must have iSCSI or Fibre Channel connection with VNXe.
+To access the storage of VNXe/Unity array, OpenStack nodes must have iSCSI or Fibre Channel connection with VNXe/Unity.
 
 #### iSCSI
 
-Make sure that OpenStack nodes have ethernet connection with VNXe array's iSCSI ports.
+Make sure that OpenStack nodes have ethernet connection with array's iSCSI ports.
 
 #### Fibre Channel
 
-Make sure OpenStack nodes's FC ports and VNXe Array's FC ports are connected. If FC SAN Auto Zoning is not enabled, zoning need be set up so that OpenStack nodes' FC ports can access VNXe Array's FC ports
+Make sure OpenStack nodes's FC ports and Array's FC ports are connected. If FC SAN Auto Zoning is not enabled, zoning need be set up so that OpenStack nodes' FC ports can access Array's FC ports
 
 ## Backend Configuration
 
@@ -78,17 +79,16 @@ Make the following changes in `/etc/cinder/cinder.conf`:
 
 Following are the elements specific to EMC VNXe driver to be configured
 
-        # storage protocol 
+        # storage protocol
         storage_protocol = iSCSI
         # storage pool which the backend is going to manage
         storage_pool_names = StoragePool00, StoragePool01
-        # VNXe management IP 
+        # Unisphere IP
         san_ip = 192.168.1.58
-        # VNXe username
+        # Unisphere username and password
         san_login = Local/admin
-        # VNXe user password
         san_password = Password123!
-        # VNXe Cinder Driver EMCVNXeDriver
+        # Volume driver name
         volume_driver = cinder.volume.drivers.emc.emc_vnxe.EMCVNXeDriver
         # backend's name
         volume_backend_name = Storage_ISCSI_01
@@ -104,15 +104,15 @@ Following are the elements specific to EMC VNXe driver to be configured
 
 ## Authentication
 
-VNXe credentials are needed so that the driver could talk with the VNXe array. Credentials in Local and LDAP scopes are supported.
+VNXe credentials are needed so that the driver could interact with the array. Credentials in Local and LDAP scopes are supported.
 
 * Local user's san_login: Local/<username> or <username>
 * LDAP user's san_login: <LDAP Domain Name>/<username>
 
 ## Multiple Pools Support
 
-Option `storage_pool_names` is used to specify which storage pool or pools of a VNXe system could be used by a Block Storage back end. To specify more than one pool, separate storage pool names with a comma.
-If `storage_pool_names` is not configured, the Block Storage back end uses all the pools on the VNXe array.  The scheduler will choose which pool to place the volume based on the capacities and capabilities of the pools when more than one pools are managed by a Block Storage back end.
+Option `storage_pool_names` is used to specify which storage pool or pools of a VNXe/Unity system could be used by a Block Storage back end. To specify more than one pool, separate storage pool names with a comma.
+If `storage_pool_names` is not configured, the Block Storage back end uses all the pools on the array.  The scheduler will choose which pool to place the volume based on the capacities and capabilities of the pools when more than one pools are managed by a Block Storage back end.
 Note that the option 'storage_pool_name' has been deprecated, the user should use the option 'storage_pool_names' instead.
 
 When a Block Storage back end is managing more than one pool, if the user wants to create a volume on a certain storage pool, a volume type with an extra spec specified storage pool should be created first, then the user can use this volume type to create the volume.
@@ -155,7 +155,7 @@ For more details on multi-backend, see [OpenStack Administration Guide](http://d
 
 ## Restriction of deployment
 
-It is not suggest to deploy the driver on Nova Compute Node if "cinder upload-to-image --force True" is to be used against an in-use volume. Otherwise, "cinder upload-to-image --force True" will terminate the VM instance's data access to the volume.
+It is not suggested to deploy the driver on Nova Compute Node if "cinder upload-to-image --force True" is to be used against an in-use volume. Otherwise, "cinder upload-to-image --force True" will terminate the VM instance's data access to the volume.
 
 ## Thick/Thin Provisioning
 

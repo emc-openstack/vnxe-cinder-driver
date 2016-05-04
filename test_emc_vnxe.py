@@ -32,7 +32,6 @@ VERSION = emc_vnxe.VERSION
 
 
 class EMCVNXeDriverTestData(object):
-
     storage_pool_name_default = 'StoragePool00'
 
     storage_pool_id_default = 'pool_1'
@@ -47,14 +46,14 @@ class EMCVNXeDriverTestData(object):
     @staticmethod
     def req_get_pool_by_name(name, fields=None):
         url = '/api/types/pool/instances?filter=%s' % \
-            urllib2.quote('name eq "%s"' % name)
+              urllib2.quote('name eq "%s"' % name)
         url += (('&fields=%s' % ','.join(fields)) if fields else "")
         return mock.call(url)
 
     @staticmethod
     def req_get_pool_by_id(id, fields=None):
-        url = '/api/instances/pool/%(obj_id)s' %\
-            {'obj_id': id}
+        url = '/api/instances/pool/%(obj_id)s' % \
+              {'obj_id': id}
         if fields:
             url += '?fields=%s' % (','.join(fields))
         return mock.call(url)
@@ -76,13 +75,14 @@ class EMCVNXeDriverTestData(object):
     resp_get_basic_system_info = {
         'entries': [
             {'content': {'id': '0',
-                         'name': storage_serial_number_default}}]}
+                         'name': storage_serial_number_default,
+                         'softwareVersion': '3.0.0'}}]}
 
     @staticmethod
     def req_get_basic_system_info(fields=None):
         url = '/api/types/basicSystemInfo/instances'
         url += (('?fields=%s' % ','.join(fields)) if fields else "")
-        return mock.call(url, return_rest_err=False)
+        return mock.call(url)
 
     resp_get_get_iscsi_portals = {
         'entries': [
@@ -114,7 +114,7 @@ class EMCVNXeDriverTestData(object):
     def req_get_get_iscsi_portals(fields=None):
         url = '/api/types/iscsiPortal/instances'
         url += (('?fields=%s' % ','.join(fields)) if fields else "")
-        return mock.call(url, return_rest_err=False)
+        return mock.call(url)
 
     resp_get_iscsi_nodes = {
         'entries': [
@@ -129,7 +129,7 @@ class EMCVNXeDriverTestData(object):
     def req_get_get_iscsi_nodes(fields=None):
         url = '/api/types/iscsiNode/instances'
         url += (('?fields=%s' % ','.join(fields)) if fields else "")
-        return mock.call(url, return_rest_err=False)
+        return mock.call(url)
 
     iscsi_targets = {'a': [('iqn.1992-04.com.emc:cx.fcnch0972c7f2a.a4',
                             '10.108.127.43', 'if_4')],
@@ -266,14 +266,14 @@ class EMCVNXeDriverTestData(object):
         'errorCode': 108007456,
         'httpStatusCode': 422,
         'messages':
-        [{'en-US': 'The user requested modification of '
-         'the storage resource but the system found that there is '
-          'nothing to modify. (Error Code:0x6701020)'}]}
+            [{'en-US': 'The user requested modification of '
+                       'the storage resource but the system found that there '
+                       'is nothing to modify. (Error Code:0x6701020)'}]}
 
     resp_modify_name_error = {'errorCode': 108007746,
                               'httpStatusCode': 422,
                               'messages':
-                              [{'en-US': 'fakeerror '}]}
+                                  [{'en-US': 'fakeerror '}]}
 
     @staticmethod
     def req_get_lun_by_id(lun_id, fields=('id', 'type', 'name', 'currentNode',
@@ -286,7 +286,7 @@ class EMCVNXeDriverTestData(object):
     @staticmethod
     def req_get_lun_by_name(name, fields=None):
         url = '/api/types/lun/instances?filter=%s' % \
-            urllib2.quote('name eq "%s"' % name)
+              urllib2.quote('name eq "%s"' % name)
         url += (('&fields=%s' % ','.join(fields)) if fields else "")
         return mock.call(url)
 
@@ -315,6 +315,25 @@ class EMCVNXeDriverTestData(object):
                  'wwn': '50:06:01:60:88:E0:00:1E:50:06:01:6D:08:E0:00:1E',
                  'storageProcessorId': {'id': 'spb'}}}]}
 
+    resp_get_fc_ports_unity = {
+        'entries': [
+            {'content':
+                {'id': 'spa_iom_0_fc0',
+                 'wwn': '50:06:01:60:88:E0:00:1E:50:06:01:64:08:E0:00:1E',
+                 'storageProcessor': {'id': 'spa'}}},
+            {'content':
+                {'id': 'spa_iom_0_fc1',
+                 'wwn': '50:06:01:60:88:E0:00:1E:50:06:01:65:08:E0:00:1E',
+                 'storageProcessor': {'id': 'spa'}}},
+            {'content':
+                {'id': 'spb_iom_0_fc0',
+                 'wwn': '50:06:01:60:88:E0:00:1E:50:06:01:6C:08:E0:00:1E',
+                 'storageProcessor': {'id': 'spb'}}},
+            {'content':
+                {'id': 'spb_iom_0_fc1',
+                 'wwn': '50:06:01:60:88:E0:00:1E:50:06:01:6D:08:E0:00:1E',
+                 'storageProcessor': {'id': 'spb'}}}]}
+
     n_resp_get_fc_ports = {
         'entries': [
             {'content':
@@ -338,7 +357,7 @@ class EMCVNXeDriverTestData(object):
     def req_get_fc_ports(fields):
         url = '/api/types/fcPort/instances'
         url += (('?fields=%s' % ','.join(fields)) if fields else "")
-        return mock.call(url, return_rest_err=False)
+        return mock.call(url)
 
     spa_iom_0_fc0 = ('5006016088E0001E', '5006016408E0001E',
                      'spa_iom_0_fc0')
@@ -387,9 +406,9 @@ class EMCVNXeDriverTestData(object):
         'volume_type_id': None,
         'host': 'fakehost@fackbe#%s' % storage_pool_name_default,
         'provider_location': 'system^%(sys)s|type^%(type)s|id^%(id)s' %
-        {'sys': storage_serial_number_default,
-         'type': 'lun',
-         'id': lun_id_default}}
+                             {'sys': storage_serial_number_default,
+                              'type': 'lun',
+                              'id': lun_id_default}}
 
     os_vol_for_manage_existing = {
         'name': 'vol1',
@@ -403,9 +422,9 @@ class EMCVNXeDriverTestData(object):
         'volume_type_id': None,
         'host': 'fakehost@fackbe#%s' % storage_pool_name_default,
         'provider_location': 'system^%(sys)s|type^%(type)s|id^%(id)s' %
-        {'sys': storage_serial_number_default,
-         'type': 'lun',
-         'id': lun_id_default}}
+                             {'sys': storage_serial_number_default,
+                              'type': 'lun',
+                              'id': lun_id_default}}
 
     os_vol_rw = {
         'name': 'vol1',
@@ -421,9 +440,9 @@ class EMCVNXeDriverTestData(object):
         'volume_admin_metadata': [{'key': 'attached_mode', 'value': 'rw'},
                                   {'key': 'readonly', 'value': 'False'}],
         'provider_location': 'system^%(sys)s|type^%(type)s|id^%(id)s' %
-        {'sys': storage_serial_number_default,
-         'type': 'lun',
-         'id': lun_id_default}}
+                             {'sys': storage_serial_number_default,
+                              'type': 'lun',
+                              'id': lun_id_default}}
 
     os_vol_ro = {
         'name': 'vol1',
@@ -438,9 +457,9 @@ class EMCVNXeDriverTestData(object):
         'host': 'fakehost@fackbe#%s' % storage_pool_name_default,
         'volume_admin_metadata': [{'key': 'readonly', 'value': 'True'}],
         'provider_location': 'system^%(sys)s|type^%(type)s|id^%(id)s' %
-        {'sys': storage_serial_number_default,
-         'type': 'lun',
-         'id': lun_id_default}}
+                             {'sys': storage_serial_number_default,
+                              'type': 'lun',
+                              'id': lun_id_default}}
 
     os_vol_with_type = {
         'name': 'vol1',
@@ -454,9 +473,9 @@ class EMCVNXeDriverTestData(object):
         'volume_type_id': 'volume_type_id_xxx',
         'host': 'fakehost@fackbe#%s' % storage_pool_name_default,
         'provider_location': 'system^%(sys)s|type^%(type)s|id^%(id)s' %
-        {'sys': storage_serial_number_default,
-         'type': 'lun',
-         'id': lun_id_default}}
+                             {'sys': storage_serial_number_default,
+                              'type': 'lun',
+                              'id': lun_id_default}}
 
     iscsi_initiator_iqn_default = 'iqn.1993-08.org.debian:01:ee4a92e19d0'
     fc_initator_node_wwn1 = '12:34:56:78:90:AB:CD:E1'
@@ -486,10 +505,10 @@ class EMCVNXeDriverTestData(object):
     mapping = {
         "test": {
             'initiator_port_wwn_list':
-            os_connector_default['wwpns'],
+                os_connector_default['wwpns'],
             'target_port_wwn_list':
-            [spa_iom_0_fc0[1], spb_iom_0_fc0[1],
-                spa_iom_0_fc1[1], spb_iom_0_fc1[1]]}}
+                [spa_iom_0_fc0[1], spb_iom_0_fc0[1],
+                 spa_iom_0_fc1[1], spb_iom_0_fc1[1]]}}
 
     host_name_default = "openstack-161"
     host_id_default = 'Host_1'
@@ -523,7 +542,7 @@ class EMCVNXeDriverTestData(object):
     @staticmethod
     def req_get_host_by_name(hostname, fields=None):
         url = '/api/types/host/instances?filter=%s' % \
-            urllib2.quote('name eq "%s"' % hostname)
+              urllib2.quote('name eq "%s"' % hostname)
         url += (('&fields=%s' % ','.join(fields)) if fields else "")
         return mock.call(url)
 
@@ -565,7 +584,7 @@ class EMCVNXeDriverTestData(object):
     @staticmethod
     def resp_create_host(hostid):
         return {"content": {
-                "id": hostid}}
+            "id": hostid}}
 
     @staticmethod
     def req_register_initiators(initiator_id, host_id):
@@ -588,7 +607,7 @@ class EMCVNXeDriverTestData(object):
     @staticmethod
     def req_get_initiator_by_uid(uid, fields=None):
         url = '/api/types/hostInitiator/instances?filter=%s' % \
-            urllib2.quote('initiatorId eq "%s"' % uid)
+              urllib2.quote('initiatorId eq "%s"' % uid)
         url += (('&fields=%s' % ','.join(fields)) if fields else "")
         return mock.call(url)
 
@@ -602,9 +621,9 @@ class EMCVNXeDriverTestData(object):
     resp_get_initiator_by_uid_fc_wwn2 = {
         'entries': [
             {'content': {
-             'id': 'HostInitiator_22',
-             'initiatorId': fc_initator_wwn2,
-             'parentHost': {'id': host_id_default}}}]}
+                'id': 'HostInitiator_22',
+                'initiatorId': fc_initator_wwn2,
+                'parentHost': {'id': host_id_default}}}]}
 
     hlu_default = 1
     resp_get_host_lun_by_ends_default = {
@@ -618,11 +637,11 @@ class EMCVNXeDriverTestData(object):
     @staticmethod
     def req_get_host_lun_by_ends(host_id, lun_id, use_type, fields):
         url = '/api/types/hostLUN/instances?filter=%s' % \
-            urllib2.quote('id lk "%%%(host)s_%(lun)s%%" and '
-                          'type eq "%(type)s"'
-                          % {'host': host_id,
-                             'lun': lun_id,
-                             'type': use_type})
+              urllib2.quote('id lk "%%%(host)s_%(lun)s%%" and '
+                            'type eq "%(type)s"'
+                            % {'host': host_id,
+                               'lun': lun_id,
+                               'type': use_type})
         url += (('&fields=%s' % ','.join(fields)) if fields else "")
         return mock.call(url)
 
@@ -660,7 +679,7 @@ class EMCVNXeDriverTestData(object):
 
     @staticmethod
     def req_get_initiator_paths_by_initiator_id(initiator_id, fields):
-        url = '/api/types/hostInitiatorPath/instances?filter=%s' %\
+        url = '/api/types/hostInitiatorPath/instances?filter=%s' % \
               urllib2.quote('id lk "%s%%"' % initiator_id)
         url += (('&fields=%s' % ','.join(fields)) if fields else "")
         return mock.call(url)
@@ -669,16 +688,16 @@ class EMCVNXeDriverTestData(object):
     def resp_get_initiator_paths_by_initiator_id_fc(
             initiator_id, isLoggedin=True, port=spa_iom_0_fc1):
         return {'entries': [{"content": {
-                "id": initiator_id + "_02%3A00%3A00%3A05",
-                "fcPort": {"id": port[2]},
-                "hostUUID": "5188d80b-f71b-d2f4-9396-0025b5500001",
-                "registrationType": 1,
-                "isLoggedIn": isLoggedin,
-                "hostPushName": "nc9083201.drm.lab.emc.com",
-                "sessionIds": ["128585"],
-                "initiator": {"id": initiator_id}}}]}
+            "id": initiator_id + "_02%3A00%3A00%3A05",
+            "fcPort": {"id": port[2]},
+            "hostUUID": "5188d80b-f71b-d2f4-9396-0025b5500001",
+            "registrationType": 1,
+            "isLoggedIn": isLoggedin,
+            "hostPushName": "nc9083201.drm.lab.emc.com",
+            "sessionIds": ["128585"],
+            "initiator": {"id": initiator_id}}}]}
 
-    resp_get_initiator_paths_by_initiator_id_no_path_fc =\
+    resp_get_initiator_paths_by_initiator_id_no_path_fc = \
         {'entries': []}
 
     @staticmethod
@@ -692,7 +711,7 @@ class EMCVNXeDriverTestData(object):
 
     @staticmethod
     def req_hide_lun(lun_id, host_access_list):
-        url = '/api/instances/storageResource/%s/action/modifyLun' %\
+        url = '/api/instances/storageResource/%s/action/modifyLun' % \
               lun_id
         body = {'lunParameters': {'hostAccess': host_access_list}}
         return mock.call(url, body)
@@ -814,12 +833,14 @@ class EMCVNXeDriverTestData(object):
 
     resp_create_snap = {'content': {'id': '12345678'}}
     fake_error_return = \
-        {"errorCode": 131149825, "httpStatusCode": 500,
+        {"errorCode": 131149825,
+         "httpStatusCode": 500,
          "messages":
-         [{"en-US": "The system encountered an unexpected error. Record "
-           "the error and go to 'Support > Need more help? > Live Chat to"
-           " chat with EMC support personnel. If this option is not avail"
-           "able, contact your service provider. (Error Code:0x7d13001)"}],
+             [{"en-US": "The system encountered an unexpected error. Record "
+                        "the error and go to 'Support > Need more help? > "
+                        "Live Chat to chat with EMC support personnel. "
+                        "If this option is not available, contact your service"
+                        " provider. (Error Code:0x7d13001)"}],
          "created": "2014-05-19T06:18:04.525Z"}
 
     @staticmethod
@@ -838,19 +859,19 @@ class EMCVNXeDriverTestData(object):
 
     @staticmethod
     def req_get_group_by_name(group_name, fields=None):
-        url = '/api/types/storageResource/instances?filter=name%20eq%20%22'\
+        url = '/api/types/storageResource/instances?filter=name%20eq%20%22' \
               + group_name + '%22&fields=id'
         return mock.call(url)
 
     @staticmethod
     def req_get_snap_by_name(snap_name, fields=None):
-        url = '/api/types/snap/instances?filter=name%20eq%20%22'\
+        url = '/api/types/snap/instances?filter=name%20eq%20%22' \
               + snap_name + '%22&fields=id'
         return mock.call(url)
 
     @staticmethod
     def req_update_consistencygroup(group_id, add_luns, remove_luns):
-        url = '/api/instances/storageResource/%s/action/modifyLunGroup'\
+        url = '/api/instances/storageResource/%s/action/modifyLunGroup' \
               % group_id
         add_data = [{"lun": {"id": add_id}}
                     for add_id in add_luns] if add_luns else []
@@ -860,8 +881,8 @@ class EMCVNXeDriverTestData(object):
                     'lunRemove': remove_data}
         return mock.call(url, req_data)
 
-    resp_create_consistencygroup = {'content': {'storageResource':
-                                                {'id': 'res_1'}}}
+    resp_create_consistencygroup = {
+        'content': {'storageResource': {'id': 'res_1'}}}
     resp_get_group_by_name = {'entries': [{'content': {'id': 'res_1'}}]}
     resp_update_consistencygroup = {}
 
@@ -883,7 +904,7 @@ class EMCVNXeDriverTestData(object):
     def req_get_pools(fields):
         get_pools_url = ('/api/types/pool/instances?'
                          'fields=%s' % ','.join(fields))
-        return mock.call(get_pools_url, return_rest_err=False)
+        return mock.call(get_pools_url)
 
     resp_get_pools = {
         'entries': [
@@ -915,7 +936,7 @@ class EMCVNXeDriverTestData(object):
     def req_get_licenses(fields):
         get_licenses_url = ('/api/types/license/instances?'
                             'fields=%s' % ','.join(fields))
-        return mock.call(get_licenses_url, return_rest_err=False)
+        return mock.call(get_licenses_url)
 
     resp_get_licenses = {
         'entries': [
@@ -938,7 +959,7 @@ class RequestSideEffect(object):
             self.actions.append((err, resp, ex))
 
     def __call__(self, rel_url, req_data=None, method=None,
-                 return_rest_err=True, *args, **kwargs):
+                 *args, **kwargs):
         if not self.started:
             self.started = True
             self.actions.reverse()
@@ -946,22 +967,18 @@ class RequestSideEffect(object):
         if item[2]:
             raise item[2]
         else:
-            if return_rest_err:
-                return item[0:2]
-            else:
-                return item[1]
+            return item[0:2]
 
 
 class EMCVNXeDriverTestCase(test.TestCase):
-
     def setUp(self):
         super(EMCVNXeDriverTestCase, self).setUp()
         self.configuration = conf.Configuration(None)
         self.configuration.append_config_values = mock.Mock(return_value=0)
         self.configuration.san_ip = '10.0.0.1'
-        conf_safe_get_map = {'storage_pool_names':
-                             TD.storage_pool_name_default,
-                             'zoning_mode': None}
+        conf_safe_get_map = {
+            'storage_pool_names': TD.storage_pool_name_default,
+            'zoning_mode': None}
         self.configuration.safe_get = mock.Mock(
             side_effect=lambda a: conf_safe_get_map[a]
             if a in conf_safe_get_map else None)
@@ -980,7 +997,6 @@ class EMCVNXeDriverTestCase(test.TestCase):
 
 
 class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
-
     def setUp(self):
         super(EMCVNXeiSCSIDriverTestCase, self).setUp()
         self.configuration.storage_protocol = 'iSCSI'
@@ -992,7 +1008,7 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
         EMCVNXeRESTClient._request = mock.Mock(side_effect=hook)
         self.driver = EMCVNXeDriver(configuration=self.configuration)
         expected_calls = [
-            TD.req_get_basic_system_info(('name',)),
+            TD.req_get_basic_system_info(('name', 'softwareVersion')),
             TD.req_get_pools(('name', 'id')),
             TD.req_get_get_iscsi_nodes(('id', 'name')),
             TD.req_get_get_iscsi_portals(('id', 'ipAddress',
@@ -1003,9 +1019,9 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
         self.assertEqual(self.driver.helper.storage_serial_number,
                          TD.storage_serial_number_default)
         self.assertEqual(False, self.driver.helper.is_managing_all_pools)
-        self.assertEqual({TD.storage_pool_name_default:
-                          TD.storage_pool_id_default},
-                         self.driver.helper.storage_pools_map)
+        self.assertEqual({
+            TD.storage_pool_name_default: TD.storage_pool_id_default},
+            self.driver.helper.storage_pools_map)
 
     def test_iscsi_targets(self):
         self.assertDictMatch(self.driver.helper.storage_targets,
@@ -1044,11 +1060,11 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
         hook.append()
         EMCVNXeRESTClient._request = mock.Mock(side_effect=hook)
         self.driver.db = mock.MagicMock()
-        self.driver.db.volume_get_all_by_group.return_value =\
+        self.driver.db.volume_get_all_by_group.return_value = \
             TD.volumes_in_group(2)
         cg_obj = fake_consistencygroup.fake_consistencyobject_obj(
             None, **TD.test_cg)
-        model_update, volumes =\
+        model_update, volumes = \
             self.driver.delete_consistencygroup(None, cg_obj)
         expected_calls = [TD.req_get_group_by_name(cg_obj.id),
                           TD.req_delete_consistencygroup('res_1')]
@@ -1062,7 +1078,7 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
         hook.append(TD.fake_error_return)
         EMCVNXeRESTClient._request = mock.Mock(side_effect=hook)
         self.driver.db = mock.MagicMock()
-        self.driver.db.volume_get_all_by_group.return_value =\
+        self.driver.db.volume_get_all_by_group.return_value = \
             TD.volumes_in_group(2)
         cg_obj = fake_consistencygroup.fake_consistencyobject_obj(
             None, **TD.test_cg)
@@ -1082,7 +1098,7 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
         EMCVNXeRESTClient._request = mock.Mock(side_effect=hook)
         cg_obj = fake_consistencygroup.fake_consistencyobject_obj(
             None, **TD.test_cg)
-        model_update =\
+        model_update = \
             self.driver.update_consistencygroup(
                 None, cg_obj, TD.volumes_in_group(2),
                 TD.volumes_in_group(2))
@@ -1119,10 +1135,10 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
         EMCVNXeRESTClient._request = mock.Mock(side_effect=hook)
         snapshot_obj = fake_snapshot.fake_snapshot_obj([TD.test_cgsnapshot,
                                                         TD.test_cgsnapshot])
-        snapshot_obj.consistencygroup_id =\
+        snapshot_obj.consistencygroup_id = \
             TD.test_cgsnapshot['consistencygroup_id']
         get_all_for_cgsnapshot.return_value = [snapshot_obj]
-        model_update, snapshots =\
+        model_update, snapshots = \
             self.driver.create_cgsnapshot(None, TD.test_cgsnapshot)
         expected_calls = [TD.req_get_group_by_name('consistencygroup_id'),
                           TD.req_create_snap('res_1', 'cgsnapshot_id',
@@ -1138,7 +1154,7 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
         EMCVNXeRESTClient._request = mock.Mock(side_effect=hook)
         snapshot_obj = fake_snapshot.fake_snapshot_obj([TD.test_cgsnapshot,
                                                         TD.test_cgsnapshot])
-        snapshot_obj.consistencygroup_id =\
+        snapshot_obj.consistencygroup_id = \
             TD.test_cgsnapshot['consistencygroup_id']
         get_all_for_cgsnapshot.return_value = [snapshot_obj]
         self.assertRaisesRegexp(exception.VolumeBackendAPIException,
@@ -1160,10 +1176,10 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
         EMCVNXeRESTClient._request = mock.Mock(side_effect=hook)
         snapshot_obj = fake_snapshot.fake_snapshot_obj([TD.test_cgsnapshot,
                                                         TD.test_cgsnapshot])
-        snapshot_obj.consistencygroup_id =\
+        snapshot_obj.consistencygroup_id = \
             TD.test_cgsnapshot['consistencygroup_id']
         get_all_for_cgsnapshot.return_value = [snapshot_obj]
-        model_update, snapshots =\
+        model_update, snapshots = \
             self.driver.delete_cgsnapshot(None, TD.test_cgsnapshot)
         expected_calls = [TD.req_get_snap_by_name('cgsnapshot_id'),
                           TD.req_delete_snap('res_1')]
@@ -1178,7 +1194,7 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
         EMCVNXeRESTClient._request = mock.Mock(side_effect=hook)
         snapshot_obj = fake_snapshot.fake_snapshot_obj([TD.test_cgsnapshot,
                                                         TD.test_cgsnapshot])
-        snapshot_obj.consistencygroup_id =\
+        snapshot_obj.consistencygroup_id = \
             TD.test_cgsnapshot['consistencygroup_id']
         get_all_for_cgsnapshot.return_value = [snapshot_obj]
         self.assertRaisesRegexp(exception.VolumeBackendAPIException,
@@ -1256,8 +1272,8 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
         EMCVNXeRESTClient._request.assert_has_calls(expected_calls)
 
     @mock.patch('cinder.volume.volume_types.get_volume_type_extra_specs',
-                mock.Mock(return_value={'storagetype:provisioning':
-                                        'Invalid'}))
+                mock.Mock(return_value={
+                    'storagetype:provisioning': 'Invalid'}))
     def test_create_volume_explicit_invalid(self):
         self.assertRaisesRegexp(exception.VolumeBackendAPIException,
                                 r'.*storagetype:provisioning.*invalid.*',
@@ -1431,7 +1447,7 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
             TD.req_get_lun_by_id(TD.lun_id_default),
             TD.req_get_initiator_by_uid(TD.iscsi_initiator_iqn_default),
             TD.req_expose_lun(TD.lun_id_default,
-                              (TD.host_id_default, ),
+                              (TD.host_id_default,),
                               (TD.HostLUNAccessEnum_Production,)),
             TD.req_get_host_lun_by_ends(TD.host_id_default,
                                         TD.lun_id_default,
@@ -1468,8 +1484,8 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
             TD.req_register_initiators('HostInitiator_11',
                                        TD.host_id_default),
             TD.req_expose_lun(TD.lun_id_default,
-                              (TD.host_id_default, ),
-                              (TD.HostLUNAccessEnum_Production, )),
+                              (TD.host_id_default,),
+                              (TD.HostLUNAccessEnum_Production,)),
             TD.req_get_host_lun_by_ends(TD.host_id_default,
                                         TD.lun_id_default,
                                         TD.HostLUNTypeEnum_LUN, ('hlu',))]
@@ -1488,7 +1504,7 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
             TD.req_get_lun_by_id(TD.lun_id_default),
             TD.req_get_initiator_by_uid(TD.iscsi_initiator_iqn_default),
             TD.req_expose_lun(TD.lun_id_default,
-                              (TD.host_id_default, ),
+                              (TD.host_id_default,),
                               (TD.HostLUNAccessEnum_Production,)),
             TD.req_get_host_lun_by_ends(TD.host_id_default,
                                         TD.lun_id_default,
@@ -1573,7 +1589,7 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
             TD.req_get_initiator_by_uid(TD.iscsi_initiator_iqn_default),
             TD.req_get_lun_by_id(TD.lun_id_default),
             TD.req_expose_lun(TD.lun_id_default,
-                              (TD.host_id_default, ),
+                              (TD.host_id_default,),
                               (TD.HostLUNAccessEnum_NoAccess,)),  # hide
         ]
 
@@ -1594,7 +1610,7 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
             TD.req_get_host_by_name(TD.os_connector_default['host'], ('id',)),
             TD.req_get_lun_by_id(TD.lun_id_default),
             TD.req_expose_lun(TD.lun_id_default,
-                              (TD.host_id_default, ),
+                              (TD.host_id_default,),
                               (TD.HostLUNAccessEnum_NoAccess,)),
         ]
         EMCVNXeRESTClient._request.assert_has_calls(expected_calls)
@@ -1647,7 +1663,7 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
             TD.req_get_initiator_by_uid(TD.iscsi_initiator_iqn_default),
             TD.req_get_lun_by_id(TD.lun_id_default),
             TD.req_expose_lun(TD.lun_id_default,
-                              (TD.host_id_default, ),
+                              (TD.host_id_default,),
                               (TD.HostLUNAccessEnum_NoAccess,)),  # hide
         ]
 
@@ -1883,14 +1899,13 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
         EMCVNXeRESTClient._request = mock.Mock(side_effect=hook)
         pools_map = self.driver.helper._get_managed_storage_pools_map(
             conf_pools)
-        expected_pools_map = {TD.storage_pool_name_default:
-                              TD.storage_pool_id_default,
-                              'StoragePool01': 'pool_2'}
+        expected_pools_map = {
+            TD.storage_pool_name_default: TD.storage_pool_id_default,
+            'StoragePool01': 'pool_2'}
         self.assertEqual(pools_map, expected_pools_map)
 
 
 class EMCVNXeFCDriverTestCase(EMCVNXeDriverTestCase):
-
     def setUp(self):
         super(EMCVNXeFCDriverTestCase, self).setUp()
         self.configuration.storage_protocol = 'FC'
@@ -1901,14 +1916,24 @@ class EMCVNXeFCDriverTestCase(EMCVNXeDriverTestCase):
         EMCVNXeRESTClient._request = mock.Mock(side_effect=hook)
         self.driver = EMCVNXeDriver(configuration=self.configuration)
         expected_calls = [
-            TD.req_get_basic_system_info(('name',)),
+            TD.req_get_basic_system_info(('name', 'softwareVersion')),
             TD.req_get_pools(('name', 'id')),
             TD.req_get_fc_ports(('id', 'wwn', 'storageProcessorId'))]
         EMCVNXeRESTClient._request.assert_has_calls(expected_calls)
+        self.driver.helper.client.UNITY = False
 
     def test_fc_targets(self):
         self.assertDictMatch(self.driver.helper.storage_targets,
                              TD.fc_targets)
+
+    def test_get_fc_targets_tb(self):
+        hook = RequestSideEffect()
+        hook.append(None, TD.resp_get_fc_ports_unity)
+        EMCVNXeRESTClient._request = mock.Mock(side_effect=hook)
+        self.driver.helper.client.UNITY = True
+        helper = self.driver.helper
+        resp = helper._get_fc_targets()
+        self.assertIsNotNone(resp['a'])
 
     def test_initialize_connection_missing_host_with_orphan(self):
         hook = RequestSideEffect()
@@ -1978,7 +2003,7 @@ class EMCVNXeFCDriverTestCase(EMCVNXeDriverTestCase):
             "errorCode": 123434,
             "httpStatusCode": 404,
             "messages": [{"en-US": "The requested resource"
-                          "does not exist. (Error Code:0x7d13123)"}],
+                                   "does not exist. (Error Code:0x7d13123)"}],
             "created": "2014-04-11T06:08:19.102Z"}
         hook.append(None, TD.resp_get_lun_by_id_default)
         hook.append(None,
@@ -1999,7 +2024,7 @@ class EMCVNXeFCDriverTestCase(EMCVNXeDriverTestCase):
             TD.req_get_initiator_by_uid(TD.fc_initator_wwn2),
             TD.req_expose_lun(TD.lun_id_default,
                               (TD.host_id_default,),
-                              (TD.HostLUNAccessEnum_Production, )),
+                              (TD.HostLUNAccessEnum_Production,)),
         ]
 
         EMCVNXeRESTClient._request.assert_has_calls(expected_calls)
@@ -2025,7 +2050,7 @@ class EMCVNXeFCDriverTestCase(EMCVNXeDriverTestCase):
         hook.append(None, TD.resp_get_host_lun_by_ends_default)
         hook.append(None, TD.resp_get_host_by_id)
         hook.append(None, TD.resp_get_initiator_paths_by_initiator_id_fc(
-                    'HostInitiator_21', False))
+            'HostInitiator_21', False))
         hook.append(None,
                     TD.resp_get_initiator_paths_by_initiator_id_fc(
                         'HostInitiator_22', False))
@@ -2227,7 +2252,7 @@ class EMCVNXeFCDriverTestCase(EMCVNXeDriverTestCase):
                                                '5006016508E0001E',
                                                '5006016D08E0001E']})
         expected_calls = [
-            TD.req_get_basic_system_info(('name',)),
+            TD.req_get_basic_system_info(('name', 'softwareVersion')),
             TD.req_get_pools(('name', 'id')),
             TD.req_get_fc_ports(('id', 'wwn', 'storageProcessorId')),
             TD.req_get_lun_by_id(TD.lun_id_default),
@@ -2290,14 +2315,14 @@ class EMCVNXeFCDriverTestCase(EMCVNXeDriverTestCase):
                                                '5006016508E0001E',
                                                '5006016D08E0001E']})
         expected_calls = [
-            TD.req_get_basic_system_info(('name',)),
+            TD.req_get_basic_system_info(('name', 'softwareVersion')),
             TD.req_get_pools(('name', 'id')),
             TD.req_get_fc_ports(('id', 'wwn', 'storageProcessorId')),
             TD.req_get_initiator_by_uid(TD.fc_initator_wwn1),
             TD.req_get_initiator_by_uid(TD.fc_initator_wwn2),
             TD.req_get_lun_by_id(TD.lun_id_default),
             TD.req_expose_lun(TD.lun_id_default,
-                              (TD.host_id_default, ),
+                              (TD.host_id_default,),
                               (TD.HostLUNAccessEnum_NoAccess,)),  # hide
         ]
 
@@ -2323,6 +2348,7 @@ class EMCVNXeFCDriverTestCase(EMCVNXeDriverTestCase):
                        'thin_provisioning_support': True,
                        'thick_provisioning_support': True,
                        'provisioned_capacity_gb': 9,
+                       'consistencygroup_support': True,
                        'max_over_subscription_ratio': 20.0}]
         }
 
@@ -2368,6 +2394,7 @@ class EMCVNXeFCDriverTestCase(EMCVNXeDriverTestCase):
                 'thin_provisioning_support': True,
                 'thick_provisioning_support': True,
                 'provisioned_capacity_gb': 9,
+                'consistencygroup_support': True,
                 'max_over_subscription_ratio': 20.0}]
         }
 
@@ -2384,6 +2411,7 @@ class EMCVNXeFCDriverTestCase(EMCVNXeDriverTestCase):
                 'thin_provisioning_support': True,
                 'thick_provisioning_support': True,
                 'provisioned_capacity_gb': 9,
+                'consistencygroup_support': True,
                 'max_over_subscription_ratio': 20.0}]
         }
 

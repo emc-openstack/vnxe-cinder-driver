@@ -45,9 +45,8 @@ from cinder.zonemanager import utils as zm_utils
 
 LOG = logging.getLogger(__name__)
 
-
 CONF = cfg.CONF
-VERSION = '00.05.00'
+VERSION = '00.06.00'
 
 GiB = 1024 * 1024 * 1024
 ENABLE_TRACE = False
@@ -104,6 +103,7 @@ def log_enter_exit(func):
                    'method': func.__name__,
                    'return': ret})
         return ret
+
     return inner
 
 
@@ -117,10 +117,12 @@ class EMCVNXeRESTClient(object):
                'Visibility': 'Enduser',
                'X-EMC-REST-CLIENT': 'true',
                'User-agent': 'EMC-OpenStack'}
+    EMC_CSRF_TOKEN = 'EMC-CSRF-TOKEN'
     HostTypeEnum_HostManual = 1
     HostLUNTypeEnum_LUN = 1
     HostLUNAccessEnum_NoAccess = 0
     HostLUNAccessEnum_Production = 1
+    UNITY = False
 
     def __init__(self, host, port=443, user='Local/admin',
                  password='', realm='Security Realm',
@@ -193,50 +195,68 @@ class EMCVNXeRESTClient(object):
              'code': err.code,
              'resp_e': err.reason})
 
-    def _request(self, rel_url, req_data=None, method=None,
-                 return_rest_err=True):
+    def _request(self, rel_url, req_data=None, method=None):
         req_body = None if req_data is None else json.dumps(req_data)
-        err = None
-        resp_data = None
         url = self.mgmt_url + rel_url
         req = urllib2.Request(url, req_body, EMCVNXeRESTClient.HEADERS)
         if method not in (None, 'GET', 'POST'):
             req.get_method = lambda: method
         self._http_log_req(req)
+        err, resp = self._send_request(req)
+        if err and err.code == 401:
+            token = self._update_csrf_token()
+            req.headers.update({'EMC-CSRF-TOKEN': token})
+            err, resp = self._send_request(req)
+        if err:
+            return self.parse_error(err, req)
+        return None, resp
+
+    def _send_request(self, req):
         try:
             resp = self.url_opener.open(req)
-            resp_body = resp.read()
-            resp_data = json.loads(resp_body) if resp_body else None
-            self._http_log_resp(resp, resp_body)
         except urllib2.HTTPError as http_err:
-            if hasattr(http_err, 'read'):
-                resp_body = http_err.read()
-                self._http_log_resp(http_err, resp_body, req)
-                if resp_body:
-                    err = json.loads(resp_body)['error']
-                else:
-                    err = {'errorCode': -1,
-                           'httpStatusCode': http_err.code,
-                           'messages': six.text_type(http_err),
-                           'request': req}
+            return http_err, None
+        resp_body = resp.read()
+        resp_data = json.loads(resp_body) if resp_body else None
+        return None, resp_data
+
+    def parse_error(self, http_err, req):
+        if hasattr(http_err, 'read'):
+            resp_body = http_err.read()
+            self._http_log_resp(http_err, resp_body, req)
+            if resp_body:
+                err = json.loads(resp_body)['error']
             else:
-                self._http_log_err(http_err, req)
-                resp_data = http_err.reason
                 err = {'errorCode': -1,
                        'httpStatusCode': http_err.code,
                        'messages': six.text_type(http_err),
                        'request': req}
+        else:
+            self._http_log_err(http_err, req)
+            err = {'errorCode': -1,
+                   'httpStatusCode': http_err.code,
+                   'messages': six.text_type(http_err),
+                   'request': req}
 
-            if not return_rest_err:
-                raise exception.VolumeBackendAPIException(data=err)
-        return (err, resp_data) if return_rest_err else resp_data
+            raise exception.VolumeBackendAPIException(data=err)
+        return err, None
+
+    def _update_csrf_token(self):
+        LOG.info(_LI('Updating EMC CSRF TOKEN.'))
+        path_user = '/api/types/user/instances'
+        req = urllib2.Request(self.mgmt_url + path_user, None,
+                              EMCVNXeRESTClient.HEADERS)
+        resp = self.url_opener.open(req)
+        self.UNITY = True
+        return resp.headers.get('EMC-CSRF-TOKEN')
 
     def _get_content_list(self, resp):
         return [entry['content'] for entry in resp['entries']]
 
     def _filter_by_fields(self, category, conditions, fields=None):
         filters = map(lambda entry: '%(f)s %(o)s "%(v)s"' %
-                      {'f': entry[0], 'o': entry[1], 'v': entry[2]},
+                                    {'f': entry[0], 'o': entry[1],
+                                     'v': entry[2]},
                       conditions)
         filter_str = ' and '.join(filters)
         filter_str = urllib2.quote(filter_str)
@@ -245,7 +265,7 @@ class EMCVNXeRESTClient(object):
             {'category': category, 'filter': filter_str})
         if fields:
             get_by_fields_url += '&fields=%s' % \
-                (','.join(map(urllib2.quote, fields)))
+                                 (','.join(map(urllib2.quote, fields)))
         err, resp = self._request(get_by_fields_url)
         return () if err else self._get_content_list(resp)
 
@@ -260,12 +280,12 @@ class EMCVNXeRESTClient(object):
         get_all_url = '/api/types/%s/instances' % category
         if fields:
             get_all_url += '?fields=%s' % (','.join(fields))
-        resp = self._request(get_all_url, return_rest_err=False)
+        err, resp = self._request(get_all_url)
         return self._get_content_list(resp)
 
     def _filter_by_id(self, category, obj_id, fields):
-        get_by_id_url = '/api/instances/%(category)s/%(obj_id)s' %\
-            {'category': category, 'obj_id': obj_id}
+        get_by_id_url = '/api/instances/%(category)s/%(obj_id)s' % \
+                        {'category': category, 'obj_id': obj_id}
         if fields:
             get_by_id_url += '?fields=%s' % (','.join(fields))
         err, resp = self._request(get_by_id_url)
@@ -375,8 +395,12 @@ class EMCVNXeRESTClient(object):
         return (err, None) if err else (err, resp['content'])
 
     def register_initiator(self, initiator_id, host_id):
+        action_name = 'register'
+        if self.UNITY:
+            action_name = 'modify'
         initiator_register_url = \
-            '/api/instances/hostInitiator/%s/action/register' % initiator_id
+            '/api/instances/hostInitiator/%s/action/%s' % (
+                initiator_id, action_name)
         data = {'host': {'id': host_id}}
         err, resp = self._request(initiator_register_url, data)
         return err, resp
@@ -427,7 +451,8 @@ class EMCVNXeRESTClient(object):
              'accessMask': self.HostLUNAccessEnum_Production})
         if lun_cg:
             lun_modify_url = (
-                '/api/instances/storageResource/%s/action/modifyLunGroup' % lun_cg)
+                '/api/instances/storageResource/%s/action/modifyLunGroup'
+                % lun_cg)
             data = {"lunModify": [
                 {'lun': {'id': lun_id},
                  'lunParameters': {'hostAccess': host_access_list}}]}
@@ -448,7 +473,8 @@ class EMCVNXeRESTClient(object):
              'accessMask': self.HostLUNAccessEnum_NoAccess})
         if lun_cg:
             lun_modify_url = (
-                '/api/instances/storageResource/%s/action/modifyLunGroup' % lun_cg)
+                '/api/instances/storageResource/%s/action/modifyLunGroup'
+                % lun_cg)
             data = {"lunModify": [
                 {'lun': {'id': lun_id},
                  'lunParameters': {'hostAccess': host_access_list}}]}
@@ -503,7 +529,6 @@ class EMCVNXeRESTClient(object):
 
 
 class ArrangeHostTask(task.Task):
-
     def __init__(self, helper, connector):
         LOG.debug('ArrangeHostTask.__init__ %s', connector)
         super(ArrangeHostTask, self).__init__(provides='host_id')
@@ -542,7 +567,6 @@ class ExposeLUNTask(task.Task):
 
 
 class GetConnectionInfoTask(task.Task):
-
     def __init__(self, helper, volume, lun_data, connector, *argv, **kwargs):
         LOG.debug('GetConnectionInfoTask.__init__ %(vol)s %(conn)s',
                   {'vol': lun_data, 'conn': connector})
@@ -565,7 +589,6 @@ class GetConnectionInfoTask(task.Task):
 
 @decorate_all_methods(log_enter_exit)
 class EMCVNXeHelper(object):
-
     stats = {'driver_version': VERSION,
              'storage_protocol': None,
              'free_capacity_gb': 'unknown',
@@ -609,11 +632,15 @@ class EMCVNXeHelper(object):
                                         self.storage_username,
                                         self.storage_password,
                                         debug=CONF.debug)
-        system_info = self.client.get_basic_system_info(('name',))
+        system_info = self.client.get_basic_system_info(
+            ('name', 'softwareVersion'))
         if not system_info:
             msg = _('Basic system information is unavailable.')
             LOG.error(msg)
             raise exception.VolumeBackendAPIException(data=msg)
+        major_version = int(system_info[0]['softwareVersion'].split('.')[0])
+        if major_version >= 4:
+            self.client.UNITY = True
         self.storage_serial_number = system_info[0]['name']
         conf_pools = self.configuration.safe_get("storage_pool_names")
         # When managed_all_pools is True, the storage_pools_map will be
@@ -683,10 +710,15 @@ class EMCVNXeHelper(object):
 
     def _get_fc_targets(self):
         res = {'a': [], 'b': []}
-        fields = ('id', 'wwn', 'storageProcessorId')
+        # compatibility handling with TB and KHP
+        if self.client.UNITY:
+            storage_processor = 'storageProcessor'
+        else:
+            storage_processor = 'storageProcessorId'
+        fields = ('id', 'wwn', storage_processor)
         pat = re.compile(r'sp(a|b)', flags=re.IGNORECASE)
         for port in self.client.get_fc_ports(fields):
-            sp_id = port['storageProcessorId']['id']
+            sp_id = port[storage_processor]['id']
             m = pat.match(sp_id)
             if m:
                 sp = m.group(1).lower()
@@ -959,7 +991,7 @@ class EMCVNXeHelper(object):
         LOG.debug('Entering EMCVNXeHelper.create_snapshot.')
         lun_id = self._extra_lun_or_snap_id(snapshot['volume'])
         if not lun_id:
-            msg = _('Failed to get LUN ID for volume %s') %\
+            msg = _('Failed to get LUN ID for volume %s') % \
                 snapshot['volume']['name']
             raise exception.VolumeBackendAPIException(data=msg)
         err, snap_id = self.client.create_snap(
@@ -1164,7 +1196,7 @@ class EMCVNXeHelper(object):
     def _get_fc_zone_info(self, connector, targets):
         initiator_wwns = connector['wwpns']
         target_wwns = [item[1] for item in targets]
-        mapping = self.lookup_service_instance.\
+        mapping = self.lookup_service_instance. \
             get_device_mapping_from_network(initiator_wwns,
                                             target_wwns)
         target_wwns, init_targ_map = self._build_init_targ_map(mapping)
@@ -1292,6 +1324,7 @@ class EMCVNXeHelper(object):
                 targets = self.storage_targets['a'] + self.storage_targets['b']
                 return self._get_fc_zone_info(connector,
                                               targets)
+
         return {
             'driver_volume_type': self._get_driver_volume_type(),
             'data': _get_fc_zone_info_in_sync()}
@@ -1408,8 +1441,8 @@ class EMCVNXeHelper(object):
         pl_dict = {'system': self.storage_serial_number,
                    'type': 'lun',
                    'id': lun_id}
-        model_update = {'provider_location':
-                        self._dumps_provider_location(pl_dict)}
+        model_update = {
+            'provider_location': self._dumps_provider_location(pl_dict)}
         return model_update
 
 
@@ -1418,7 +1451,6 @@ class EMCVNXeDriver(san.SanDriver):
     """EMC VMXe Driver."""
 
     def __init__(self, *args, **kwargs):
-
         super(EMCVNXeDriver, self).__init__(*args, **kwargs)
         self.helper = EMCVNXeHelper(self.configuration)
 
