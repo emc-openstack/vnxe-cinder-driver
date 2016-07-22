@@ -23,7 +23,6 @@ This driver supports Mitaka release.
 ## Requirements
 
 * VNXe3200 with OE V3.1.1
-* Unity with OE V4.0.x
 * Fibre Channel Licence (if FC is to be used)
 * Internet Small Computer System Interface License (if iSCSI is to be used)
 * Thin Provisioning Licence
@@ -63,7 +62,7 @@ Copy the above python file to the `cinder/volume/drivers/emc/` directory of your
 
 ### San Connection
 
-To access the storage of VNXe/Unity array, OpenStack nodes must have iSCSI or Fibre Channel connection with VNXe/Unity.
+To access the storage of VNXe array, OpenStack nodes must have iSCSI or Fibre Channel connection with VNXe.
 
 #### iSCSI
 
@@ -71,7 +70,7 @@ Make sure that OpenStack nodes have ethernet connection with array's iSCSI ports
 
 #### Fibre Channel
 
-Make sure OpenStack nodes's FC ports and Array's FC ports are connected. If FC SAN Auto Zoning is not enabled, zoning need be set up so that OpenStack nodes' FC ports can access Array's FC ports
+Make sure OpenStack nodes's FC ports and array's FC ports are connected. If FC SAN Auto Zoning is not enabled, zoning need be set up so that OpenStack nodes' FC ports can access array's FC ports
 
 ## Backend Configuration
 
@@ -79,9 +78,9 @@ Make the following changes in `/etc/cinder/cinder.conf`:
 
 Following are the elements specific to EMC VNXe driver to be configured
 
-        # storage protocol
+        # Storage protocol
         storage_protocol = iSCSI
-        # storage pool which the backend is going to manage
+        # Storage pool which the backend is going to manage
         storage_pool_names = StoragePool00, StoragePool01
         # Unisphere IP
         san_ip = 192.168.1.58
@@ -90,7 +89,7 @@ Following are the elements specific to EMC VNXe driver to be configured
         san_password = Password123!
         # Volume driver name
         volume_driver = cinder.volume.drivers.emc.emc_vnxe.EMCVNXeDriver
-        # backend's name
+        # Backend's name
         volume_backend_name = Storage_ISCSI_01
 
         [database]
@@ -111,7 +110,7 @@ VNXe credentials are needed so that the driver could interact with the array. Cr
 
 ## Multiple Pools Support
 
-Option `storage_pool_names` is used to specify which storage pool or pools of a VNXe/Unity system could be used by a Block Storage back end. To specify more than one pool, separate storage pool names with a comma.
+Option `storage_pool_names` is used to specify which storage pool or pools of a VNXe system could be used by a Block Storage back end. To specify more than one pool, separate storage pool names with a comma.
 If `storage_pool_names` is not configured, the Block Storage back end uses all the pools on the array.  The scheduler will choose which pool to place the volume based on the capacities and capabilities of the pools when more than one pools are managed by a Block Storage back end.
 Note that the option 'storage_pool_name' has been deprecated, the user should use the option 'storage_pool_names' instead.
 

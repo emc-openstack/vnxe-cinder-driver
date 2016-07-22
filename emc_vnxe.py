@@ -31,7 +31,7 @@ import six
 import taskflow.engines
 from taskflow.patterns import linear_flow
 from taskflow import task
-from taskflow.utils import misc
+from taskflow.types import failure
 
 from cinder import exception
 from cinder.i18n import _, _LW, _LI, _LE
@@ -46,7 +46,7 @@ from cinder.zonemanager import utils as zm_utils
 LOG = logging.getLogger(__name__)
 
 CONF = cfg.CONF
-VERSION = '00.06.00'
+VERSION = '00.06.01'
 
 GiB = 1024 * 1024 * 1024
 ENABLE_TRACE = False
@@ -117,12 +117,10 @@ class EMCVNXeRESTClient(object):
                'Visibility': 'Enduser',
                'X-EMC-REST-CLIENT': 'true',
                'User-agent': 'EMC-OpenStack'}
-    EMC_CSRF_TOKEN = 'EMC-CSRF-TOKEN'
     HostTypeEnum_HostManual = 1
     HostLUNTypeEnum_LUN = 1
     HostLUNAccessEnum_NoAccess = 0
     HostLUNAccessEnum_Production = 1
-    UNITY = False
 
     def __init__(self, host, port=443, user='Local/admin',
                  password='', realm='Security Realm',
@@ -203,10 +201,6 @@ class EMCVNXeRESTClient(object):
             req.get_method = lambda: method
         self._http_log_req(req)
         err, resp = self._send_request(req)
-        if err and err.code == 401:
-            token = self._update_csrf_token()
-            req.headers.update({'EMC-CSRF-TOKEN': token})
-            err, resp = self._send_request(req)
         if err:
             return self.parse_error(err, req)
         return None, resp
@@ -214,10 +208,11 @@ class EMCVNXeRESTClient(object):
     def _send_request(self, req):
         try:
             resp = self.url_opener.open(req)
+            resp_body = resp.read()
+            resp_data = json.loads(resp_body) if resp_body else None
+            self._http_log_resp(resp, resp_body)
         except urllib2.HTTPError as http_err:
             return http_err, None
-        resp_body = resp.read()
-        resp_data = json.loads(resp_body) if resp_body else None
         return None, resp_data
 
     def parse_error(self, http_err, req):
@@ -240,15 +235,6 @@ class EMCVNXeRESTClient(object):
 
             raise exception.VolumeBackendAPIException(data=err)
         return err, None
-
-    def _update_csrf_token(self):
-        LOG.info(_LI('Updating EMC CSRF TOKEN.'))
-        path_user = '/api/types/user/instances'
-        req = urllib2.Request(self.mgmt_url + path_user, None,
-                              EMCVNXeRESTClient.HEADERS)
-        resp = self.url_opener.open(req)
-        self.UNITY = True
-        return resp.headers.get('EMC-CSRF-TOKEN')
 
     def _get_content_list(self, resp):
         return [entry['content'] for entry in resp['entries']]
@@ -396,8 +382,6 @@ class EMCVNXeRESTClient(object):
 
     def register_initiator(self, initiator_id, host_id):
         action_name = 'register'
-        if self.UNITY:
-            action_name = 'modify'
         initiator_register_url = \
             '/api/instances/hostInitiator/%s/action/%s' % (
                 initiator_id, action_name)
@@ -558,7 +542,7 @@ class ExposeLUNTask(task.Task):
     def revert(self, result, host_id, *args, **kwargs):
         LOG.warning(_LW('ExposeLUNTask.revert %(vol)s %(host)s'),
                     {'vol': self.lun_data, 'host': host_id})
-        if isinstance(result, misc.Failure):
+        if isinstance(result, failure.Failure):
             LOG.warning(_LW('ExposeLUNTask.revert: Nothing to revert'))
             return
         else:
@@ -638,9 +622,6 @@ class EMCVNXeHelper(object):
             msg = _('Basic system information is unavailable.')
             LOG.error(msg)
             raise exception.VolumeBackendAPIException(data=msg)
-        major_version = int(system_info[0]['softwareVersion'].split('.')[0])
-        if major_version >= 4:
-            self.client.UNITY = True
         self.storage_serial_number = system_info[0]['name']
         conf_pools = self.configuration.safe_get("storage_pool_names")
         # When managed_all_pools is True, the storage_pools_map will be
@@ -710,11 +691,7 @@ class EMCVNXeHelper(object):
 
     def _get_fc_targets(self):
         res = {'a': [], 'b': []}
-        # compatibility handling with TB and KHP
-        if self.client.UNITY:
-            storage_processor = 'storageProcessor'
-        else:
-            storage_processor = 'storageProcessorId'
+        storage_processor = 'storageProcessorId'
         fields = ('id', 'wwn', storage_processor)
         pat = re.compile(r'sp(a|b)', flags=re.IGNORECASE)
         for port in self.client.get_fc_ports(fields):

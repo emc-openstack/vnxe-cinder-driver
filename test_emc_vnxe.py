@@ -315,25 +315,6 @@ class EMCVNXeDriverTestData(object):
                  'wwn': '50:06:01:60:88:E0:00:1E:50:06:01:6D:08:E0:00:1E',
                  'storageProcessorId': {'id': 'spb'}}}]}
 
-    resp_get_fc_ports_unity = {
-        'entries': [
-            {'content':
-                {'id': 'spa_iom_0_fc0',
-                 'wwn': '50:06:01:60:88:E0:00:1E:50:06:01:64:08:E0:00:1E',
-                 'storageProcessor': {'id': 'spa'}}},
-            {'content':
-                {'id': 'spa_iom_0_fc1',
-                 'wwn': '50:06:01:60:88:E0:00:1E:50:06:01:65:08:E0:00:1E',
-                 'storageProcessor': {'id': 'spa'}}},
-            {'content':
-                {'id': 'spb_iom_0_fc0',
-                 'wwn': '50:06:01:60:88:E0:00:1E:50:06:01:6C:08:E0:00:1E',
-                 'storageProcessor': {'id': 'spb'}}},
-            {'content':
-                {'id': 'spb_iom_0_fc1',
-                 'wwn': '50:06:01:60:88:E0:00:1E:50:06:01:6D:08:E0:00:1E',
-                 'storageProcessor': {'id': 'spb'}}}]}
-
     n_resp_get_fc_ports = {
         'entries': [
             {'content':
@@ -1920,20 +1901,10 @@ class EMCVNXeFCDriverTestCase(EMCVNXeDriverTestCase):
             TD.req_get_pools(('name', 'id')),
             TD.req_get_fc_ports(('id', 'wwn', 'storageProcessorId'))]
         EMCVNXeRESTClient._request.assert_has_calls(expected_calls)
-        self.driver.helper.client.UNITY = False
 
     def test_fc_targets(self):
         self.assertDictMatch(self.driver.helper.storage_targets,
                              TD.fc_targets)
-
-    def test_get_fc_targets_tb(self):
-        hook = RequestSideEffect()
-        hook.append(None, TD.resp_get_fc_ports_unity)
-        EMCVNXeRESTClient._request = mock.Mock(side_effect=hook)
-        self.driver.helper.client.UNITY = True
-        helper = self.driver.helper
-        resp = helper._get_fc_targets()
-        self.assertIsNotNone(resp['a'])
 
     def test_initialize_connection_missing_host_with_orphan(self):
         hook = RequestSideEffect()
