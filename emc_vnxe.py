@@ -55,11 +55,7 @@ loc_opts = [
     cfg.StrOpt('storage_pool_names',
                default=None,
                deprecated_name='storage_pool_name',
-               help='Comma-separated list of storage pool names to be used.'),
-    cfg.StrOpt('storage_protocol',
-               default='iSCSI',
-               help='Protocol to access the storage '
-                    'allocated from this Cinder backend')]
+               help='Comma-separated list of storage pool names to be used.')]
 
 CONF.register_opts(loc_opts)
 
