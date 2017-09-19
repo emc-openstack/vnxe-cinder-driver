@@ -20,6 +20,7 @@ import cookielib
 import json
 import random
 import re
+import ssl
 import types
 import urllib2
 
@@ -46,7 +47,7 @@ from cinder.zonemanager import utils as zm_utils
 LOG = logging.getLogger(__name__)
 
 CONF = cfg.CONF
-VERSION = '00.06.01'
+VERSION = '00.06.02'
 
 GiB = 1024 * 1024 * 1024
 ENABLE_TRACE = False
@@ -128,7 +129,11 @@ class EMCVNXeRESTClient(object):
         self.mgmt_url = 'https://%(host)s:%(port)s' % {'host': host,
                                                        'port': port}
         self.debug = debug
-        https_hander = urllib2.HTTPSHandler()
+        context = self._create_ssl_context()
+        if context:
+            https_hander = urllib2.HTTPSHandler(context=context)
+        else:
+            https_hander = urllib2.HTTPSHandler()
         cookie_jar = cookielib.CookieJar()
         cookie_hander = urllib2.HTTPCookieProcessor(cookie_jar)
         passwd_mgr = urllib2.HTTPPasswordMgrWithDefaultRealm()
@@ -140,6 +145,24 @@ class EMCVNXeRESTClient(object):
         self.url_opener = urllib2.build_opener(https_hander,
                                                cookie_hander,
                                                auth_handler)
+
+    @staticmethod
+    def _create_ssl_context():
+        """Create context for ssl verification.
+
+        .. note:: starting from python 2.7.9 ssl adds create_default_context.
+                  We need to keep compatibility with previous python as well.
+        """
+        try:
+            context = ssl.create_default_context()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+        except AttributeError:
+            LOG.warning(
+                _LW('Creating ssl context is not supported on this '
+                    'version of Python, ssl verification is disabled.'))
+            context = None
+        return context
 
     def _http_log_req(self, req):
         if not self.debug:
