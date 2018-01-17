@@ -47,7 +47,7 @@ from cinder.zonemanager import utils as zm_utils
 LOG = logging.getLogger(__name__)
 
 CONF = cfg.CONF
-VERSION = '00.07.00'
+VERSION = '00.08.00'
 
 GiB = 1024 * 1024 * 1024
 ENABLE_TRACE = False
@@ -805,7 +805,7 @@ class EMCVNXeHelper(object):
                 if id:
                     provisioning = (
                         volume_types.get_volume_type_extra_specs(id)
-                        ['storagetype:provisioning'])
+                        ['provisioning:type'])
                     if provisioning == 'compressed':
                         msg = _("Failed to create consistency group %s "
                                 "because VNXe consistency group cannot "
@@ -831,7 +831,9 @@ class EMCVNXeHelper(object):
     def delete_consistencygroup(self, group, volumes):
         """Deletes a consistency group."""
         cg_id = self._get_group_id_by_name(group.id, False)
+        volumes_model_update = []
         model_update = {'status': group.status}
+
         if cg_id is not None:
             err, res = self.client.delete_consistencygroup(cg_id)
             if err:
@@ -843,9 +845,18 @@ class EMCVNXeHelper(object):
                 else:
                     raise exception.VolumeBackendAPIException(
                         data=err['messages'])
+
         for volume in volumes:
-                volume['status'] = 'deleted'
-        return model_update, volumes
+            try:
+                self.delete_volume(volume)
+                volumes_model_update.append(
+                    {'id': volume.id,
+                     'status': 'deleted'})
+            except exception.VolumeBackendAPIException:
+                volumes_model_update.append(
+                    {'id': volume.id,
+                     'status': 'error_deleting'})
+        return model_update, volumes_model_update
 
     def update_consistencygroup(self, group, add_volumes, remove_volumes):
         """Adds or removes LUN(s) to/from an existing consistency group"""
@@ -866,6 +877,8 @@ class EMCVNXeHelper(object):
         cg_name = self._get_group_id_by_name(cgsnapshot['consistencygroup_id'])
         snap_name = cgsnapshot['id']
         snap_desc = cgsnapshot['description']
+        snapshots_model_update = []
+
         err, res = self.client.create_snap(cg_name, snap_name, snap_desc)
         if err:
             # Ignore the error if CG Snapshot already exists
@@ -875,15 +888,20 @@ class EMCVNXeHelper(object):
                     snap_name)
             else:
                 raise exception.VolumeBackendAPIException(data=err['messages'])
+
         model_update = {'status': cgsnapshot['status']}
         for snapshot in snapshots:
-            snapshot['status'] = 'available'
-        return model_update, snapshots
+            snapshots_model_update.append(
+                {'id': snapshot.id, 'status': 'available'})
+
+        return model_update, snapshots_model_update
 
     def delete_cgsnapshot(self, cgsnapshot, snapshots):
         """Deletes a cgsnapshot (snap group)."""
         snap_id = self._get_snap_id_by_name(cgsnapshot['id'], False)
         model_update = {'status': cgsnapshot['status']}
+        snapshots_model_update = []
+
         if snap_id is not None:
             err, resp = self.client.delete_snap(snap_id)
             if err:
@@ -895,15 +913,18 @@ class EMCVNXeHelper(object):
                 else:
                     raise exception.VolumeBackendAPIException(
                         data=err['messages'])
+
         for snapshot in snapshots:
-            snapshot['status'] = 'deleted'
-        return model_update, snapshots
+            snapshots_model_update.append(
+                {'id': snapshot.id, 'status': 'deleted'})
+
+        return model_update, snapshots_model_update
 
     def create_volume(self, volume):
         name = volume['name']
         size = volume['size'] * GiB
         extra_specs = self._get_volumetype_extraspecs(volume)
-        k = 'storagetype:provisioning'
+        k = 'provisioning:type'
         is_thin = False
         if k in extra_specs:
             v = extra_specs[k].lower()
@@ -921,9 +942,9 @@ class EMCVNXeHelper(object):
         if err:
             raise exception.VolumeBackendAPIException(data=err['messages'])
 
-        if volume.get('consistencygroup_id'):
+        if volume.get('group_id'):
             cg_id = (
-                self._get_group_id_by_name(volume.get('consistencygroup_id')))
+                self._get_group_id_by_name(volume.get('group_id')))
             err, res = self.client.update_consistencygroup(cg_id, [lun['id']])
             if err:
                 raise exception.VolumeBackendAPIException(data=err['messages'])
@@ -939,24 +960,10 @@ class EMCVNXeHelper(object):
     def create_volume_from_snapshot(self, volume, snapshot):
         # To be implemented with Replication and TaskFlow
         raise NotImplementedError()
-        pl_dict = {'system': self.storage_serial_number,
-                   'type': 'lun',
-                   'id': 'unknown yet'}
-        model_update = {'provider_location':
-                        self._dumps_provider_location(pl_dict)}
-        volume['provider_location'] = model_update['provider_location']
-        return model_update
 
     def create_cloned_volume(self, volume, src_vref):
         # To be implemented with Replication and TaskFlow
         raise NotImplementedError()
-        pl_dict = {'system': self.storage_serial_number,
-                   'type': 'lun',
-                   'id': 'unknown yet'}
-        model_update = {'provider_location':
-                        self._dumps_provider_location(pl_dict)}
-        volume['provider_location'] = model_update['provider_location']
-        return model_update
 
     def _extra_lun_or_snap_id(self, volume):
         if volume.get('provider_location') is None:
@@ -1150,8 +1157,8 @@ class EMCVNXeHelper(object):
 
     def expose_lun(self, volume, lun_data, host_id):
         lun_id = lun_data['id']
-        lun_cg = (self._get_group_id_by_name(volume.get('consistencygroup_id'))
-                  if volume.get('consistencygroup_id') else None)
+        lun_cg = (self._get_group_id_by_name(volume.get('group_id'))
+                  if volume.get('group_id') else None)
         host_access = (lun_data['hostAccess'] if 'hostAccess' in lun_data
                        else [])
         if self.lookup_service_instance and self.storage_protocol == 'FC':
@@ -1290,8 +1297,8 @@ class EMCVNXeHelper(object):
 
     def hide_lun(self, volume, lun_data, host_id):
         lun_id = lun_data['id']
-        lun_cg = (self._get_group_id_by_name(volume.get('consistencygroup_id'))
-                  if volume.get('consistencygroup_id') else None)
+        lun_cg = (self._get_group_id_by_name(volume.get('group_id'))
+                  if volume.get('group_id') else None)
         host_access = (lun_data['hostAccess'] if 'hostAccess' in lun_data
                        else [])
         err, resp = self.client.hide_lun(lun_id,
@@ -1456,8 +1463,7 @@ class EMCVNXeDriver(san.SanDriver):
     def create_consistencygroup(self, context, group):
         return self.helper.create_consistencygroup(group)
 
-    def delete_consistencygroup(self, context, group):
-        volumes = self.db.volume_get_all_by_group(context, group.id)
+    def delete_consistencygroup(self, context, group, volumes):
         return self.helper.delete_consistencygroup(group, volumes)
 
     def update_consistencygroup(self, context, group,
@@ -1465,14 +1471,10 @@ class EMCVNXeDriver(san.SanDriver):
         return self.helper.update_consistencygroup(group,
                                                    add_volumes, remove_volumes)
 
-    def create_cgsnapshot(self, context, cgsnapshot):
-        snapshots = objects.SnapshotList().get_all_for_cgsnapshot(
-            context, cgsnapshot['id'])
+    def create_cgsnapshot(self, context, cgsnapshot, snapshots):
         return self.helper.create_cgsnapshot(cgsnapshot, snapshots)
 
-    def delete_cgsnapshot(self, context, cgsnapshot):
-        snapshots = objects.SnapshotList().get_all_for_cgsnapshot(
-            context, cgsnapshot['id'])
+    def delete_cgsnapshot(self, context, cgsnapshot, snapshots):
         return self.helper.delete_cgsnapshot(cgsnapshot, snapshots)
 
     def create_volume(self, volume):
@@ -1508,11 +1510,11 @@ class EMCVNXeDriver(san.SanDriver):
     def extend_volume(self, volume, new_size):
         return self.helper.extend_volume(volume, new_size)
 
-    @zm_utils.AddFCZone
+    @zm_utils.add_fc_zone
     def initialize_connection(self, volume, connector):
         return self.helper.initialize_connection(volume, connector)
 
-    @zm_utils.RemoveFCZone
+    @zm_utils.remove_fc_zone
     def terminate_connection(self, volume, connector, **kwargs):
         return self.helper.terminate_connection(volume, connector)
 

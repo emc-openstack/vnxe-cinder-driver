@@ -18,11 +18,11 @@ EMCVNXeDriver performs the volume operations by Restful API management interface
 
 ## Supported OpenStack Release
 
-This driver supports Mitaka release.
+This driver supports Ocata release.
 
 ## Requirements
 
-* VNXe3200 with OE V3.1.1
+* VNXe3200 with OE V3.1.1 or later
 * Fibre Channel Licence (if FC is to be used)
 * Internet Small Computer System Interface License (if iSCSI is to be used)
 * Thin Provisioning Licence
@@ -57,8 +57,11 @@ The following operations will be supported by VNXe Cinder Driver:
 VNXe Cinder Driver (EMCVNXeDriver) is provided in the installer package consists of one python file:
 
         emc_vnxe.py
+Copy the above python file to the `cinder/volume/drivers/dell_emc/` directory of your OpenStack node(s) where cinder-volume is running.
 
-Copy the above python file to the `cinder/volume/drivers/emc/` directory of your OpenStack node(s) where cinder-volume is running.
+> Note: In Ocata release, the driver directory is changed from emc/ to dell_emc/, please copy the python file to this directory.
+>
+> Please also confirm the volume_driver option in cinder.conf, for the details, please refer "Backend Configuration" section.
 
 ### San Connection
 
@@ -88,7 +91,7 @@ Following are the elements specific to EMC VNXe driver to be configured
         san_login = Local/admin
         san_password = Password123!
         # Volume driver name
-        volume_driver = cinder.volume.drivers.emc.emc_vnxe.EMCVNXeDriver
+        volume_driver = cinder.volume.drivers.dell_emc.emc_vnxe.EMCVNXeDriver
         # Backend's name
         volume_backend_name = Storage_ISCSI_01
 
@@ -133,7 +136,7 @@ Here is an example about the volume type creation:
         san_ip = 192.168.1.58
         san_login = Local/admin
         san_password = Password123!
-        volume_driver = cinder.volume.drivers.emc.emc_vnxe.EMCVNXeDriver
+        volume_driver = cinder.volume.drivers.dell_emc.emc_vnxe.EMCVNXeDriver
         volume_backend_name = backendA
 
         [backendB]
@@ -142,7 +145,7 @@ Here is an example about the volume type creation:
         san_ip = 192.168.1.58
         san_login = Local/admin
         san_password = Password123!
-        volume_driver = cinder.volume.drivers.emc.emc_vnxe.EMCVNXeDriver
+        volume_driver = cinder.volume.drivers.dell_emc.emc_vnxe.EMCVNXeDriver
         volume_backend_name = backendB
 
         [database]
