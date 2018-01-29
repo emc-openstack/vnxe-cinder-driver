@@ -13,19 +13,21 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import mock
-
 import urllib2
+
+import mock
 
 from cinder import exception
 from cinder import test
-from cinder.tests.unit import fake_consistencygroup
+from cinder.tests.unit import fake_constants as fake
 from cinder.tests.unit import fake_snapshot
+from cinder.tests.unit import fake_volume
+from cinder.tests.unit.consistencygroup import fake_consistencygroup
 from cinder.volume import configuration as conf
-from cinder.volume.drivers.emc import emc_vnxe
-from cinder.volume.drivers.emc.emc_vnxe import EMCVNXeDriver
-from cinder.volume.drivers.emc.emc_vnxe import EMCVNXeRESTClient
 from cinder.volume import volume_types
+from cinder.volume.drivers.dell_emc import emc_vnxe
+from cinder.volume.drivers.dell_emc.emc_vnxe import EMCVNXeDriver
+from cinder.volume.drivers.dell_emc.emc_vnxe import EMCVNXeRESTClient
 
 GiB = 1024 * 1024 * 1024
 VERSION = emc_vnxe.VERSION
@@ -1005,7 +1007,7 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
             self.driver.helper.storage_pools_map)
 
     def test_iscsi_targets(self):
-        self.assertDictMatch(self.driver.helper.storage_targets,
+        self.assertDictEqual(self.driver.helper.storage_targets,
                              TD.iscsi_targets)
 
     def test_create_consistencygroup_default(self):
@@ -1045,13 +1047,17 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
             TD.volumes_in_group(2)
         cg_obj = fake_consistencygroup.fake_consistencyobject_obj(
             None, **TD.test_cg)
-        model_update, volumes = \
-            self.driver.delete_consistencygroup(None, cg_obj)
+        fake_provider_location = 'type^lun|id^' + fake.VOLUME_ID
+        volume = fake_volume.fake_volume_obj(
+            None, provider_location=fake_provider_location)
+        hook.append(None, TD.req_delete_lun(volume.id))
+        model_update, volumes_model_update = \
+            self.driver.delete_consistencygroup(None, cg_obj, [volume])
         expected_calls = [TD.req_get_group_by_name(cg_obj.id),
                           TD.req_delete_consistencygroup('res_1')]
         EMCVNXeRESTClient._request.assert_has_calls(expected_calls)
-        for volume in volumes:
-            self.assertTrue(volume['status'] is 'deleted')
+        for volume_status in volumes_model_update:
+            self.assertTrue(volume_status['status'] is 'deleted')
 
     def test_delete_consistencygroup_failed(self):
         hook = RequestSideEffect()
@@ -1063,11 +1069,12 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
             TD.volumes_in_group(2)
         cg_obj = fake_consistencygroup.fake_consistencyobject_obj(
             None, **TD.test_cg)
+        volumes = [fake_volume.fake_volume_obj(None)]
         self.assertRaisesRegexp(exception.VolumeBackendAPIException,
                                 r'.*The system encountered '
                                 'an unexpected error*',
                                 self.driver.delete_consistencygroup,
-                                None, cg_obj)
+                                None, cg_obj, volumes)
         expected_calls = [TD.req_get_group_by_name(cg_obj.id),
                           TD.req_delete_consistencygroup('res_1')]
         EMCVNXeRESTClient._request.assert_has_calls(expected_calls)
@@ -1118,13 +1125,15 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
                                                         TD.test_cgsnapshot])
         snapshot_obj.consistencygroup_id = \
             TD.test_cgsnapshot['consistencygroup_id']
-        get_all_for_cgsnapshot.return_value = [snapshot_obj]
-        model_update, snapshots = \
-            self.driver.create_cgsnapshot(None, TD.test_cgsnapshot)
+        model_update, snapshots_model_update = \
+            self.driver.create_cgsnapshot(None, TD.test_cgsnapshot,
+                                          [snapshot_obj])
         expected_calls = [TD.req_get_group_by_name('consistencygroup_id'),
                           TD.req_create_snap('res_1', 'cgsnapshot_id',
                                              'test_cgsnapshot')]
         EMCVNXeRESTClient._request.assert_has_calls(expected_calls)
+        for snapshot_status in snapshots_model_update:
+            self.assertTrue(snapshot_status['status'] is 'available')
 
     @mock.patch(
         'cinder.objects.snapshot.SnapshotList.get_all_for_cgsnapshot')
@@ -1137,12 +1146,12 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
                                                         TD.test_cgsnapshot])
         snapshot_obj.consistencygroup_id = \
             TD.test_cgsnapshot['consistencygroup_id']
-        get_all_for_cgsnapshot.return_value = [snapshot_obj]
         self.assertRaisesRegexp(exception.VolumeBackendAPIException,
                                 r'.*The system encountered '
                                 'an unexpected error*',
                                 self.driver.create_cgsnapshot,
-                                None, TD.test_cgsnapshot)
+                                None, TD.test_cgsnapshot,
+                                [snapshot_obj])
         expected_calls = [TD.req_get_group_by_name('consistencygroup_id'),
                           TD.req_create_snap('res_1', 'cgsnapshot_id',
                                              'test_cgsnapshot')]
@@ -1159,12 +1168,14 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
                                                         TD.test_cgsnapshot])
         snapshot_obj.consistencygroup_id = \
             TD.test_cgsnapshot['consistencygroup_id']
-        get_all_for_cgsnapshot.return_value = [snapshot_obj]
-        model_update, snapshots = \
-            self.driver.delete_cgsnapshot(None, TD.test_cgsnapshot)
+        model_update, snapshots_model_update = \
+            self.driver.delete_cgsnapshot(None, TD.test_cgsnapshot,
+                                          [snapshot_obj])
         expected_calls = [TD.req_get_snap_by_name('cgsnapshot_id'),
                           TD.req_delete_snap('res_1')]
         EMCVNXeRESTClient._request.assert_has_calls(expected_calls)
+        for snapshot_status in snapshots_model_update:
+            self.assertTrue(snapshot_status['status'] is 'deleted')
 
     @mock.patch(
         'cinder.objects.snapshot.SnapshotList.get_all_for_cgsnapshot')
@@ -1177,12 +1188,11 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
                                                         TD.test_cgsnapshot])
         snapshot_obj.consistencygroup_id = \
             TD.test_cgsnapshot['consistencygroup_id']
-        get_all_for_cgsnapshot.return_value = [snapshot_obj]
         self.assertRaisesRegexp(exception.VolumeBackendAPIException,
                                 r'.*The system encountered '
                                 'an unexpected error*',
                                 self.driver.delete_cgsnapshot,
-                                None, TD.test_cgsnapshot)
+                                None, TD.test_cgsnapshot, [snapshot_obj])
         expected_calls = [TD.req_get_snap_by_name('cgsnapshot_id'),
                           TD.req_delete_snap('res_1')]
         EMCVNXeRESTClient._request.assert_has_calls(expected_calls)
@@ -1201,13 +1211,13 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
         self.assertTrue('provider_location' in model_update)
         pl_dict = self.load_provider_location(
             model_update['provider_location'])
-        self.assertDictMatch(pl_dict,
+        self.assertDictEqual(pl_dict,
                              {'system': TD.storage_serial_number_default,
                               'type': 'lun',
                               'id': TD.lun_id_default})
 
     @mock.patch('cinder.volume.volume_types.get_volume_type_extra_specs',
-                mock.Mock(return_value={'storagetype:provisioning': 'Thin'}))
+                mock.Mock(return_value={'provisioning:type': 'Thin'}))
     def test_create_volume_explicit_thin(self):
         hook = RequestSideEffect()
         hook.append(None, TD.resp_create_lun)
@@ -1254,10 +1264,10 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
 
     @mock.patch('cinder.volume.volume_types.get_volume_type_extra_specs',
                 mock.Mock(return_value={
-                    'storagetype:provisioning': 'Invalid'}))
+                    'provisioning:type': 'Invalid'}))
     def test_create_volume_explicit_invalid(self):
         self.assertRaisesRegexp(exception.VolumeBackendAPIException,
-                                r'.*storagetype:provisioning.*invalid.*',
+                                r'.*provisioning:type.*invalid.*',
                                 self.driver.create_volume,
                                 TD.os_vol_with_type)
 
@@ -1434,7 +1444,7 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
                                         TD.lun_id_default,
                                         TD.HostLUNTypeEnum_LUN, ('hlu',))]
         EMCVNXeRESTClient._request.assert_has_calls(expected_calls)
-        self.assertDictMatch(conn_info['data'],
+        self.assertDictEqual(conn_info['data'],
                              {'target_luns': [TD.hlu_default, TD.hlu_default],
                               'target_iqns': TD.get_iscsi_iqns(TD),
                               'target_portals': TD.get_iscsi_portals(TD),
@@ -1679,8 +1689,8 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
                                mock.Mock(return_value='iSCSI_BACKEND')):
             stats = self.driver.update_volume_stats()
         self.assertEqual(expect_stats, stats)
-        self.assertDictMatch(stats, expect_stats)
-        self.assertDictMatch(self.driver.helper.storage_targets,
+        self.assertDictEqual(stats, expect_stats)
+        self.assertDictEqual(self.driver.helper.storage_targets,
                              TD.iscsi_targets)
         expected_calls = [
             TD.req_get_licenses(('id', 'isValid')),
@@ -1748,9 +1758,9 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
                                mock.Mock(return_value='iSCSI_BACKEND')):
             stats = self.driver.update_volume_stats()
             newstats = self.driver.get_volume_stats(True)
-        self.assertDictMatch(stats, expect_stats)
-        self.assertDictMatch(newstats, expect_new_stats)
-        self.assertDictMatch(self.driver.helper.storage_targets,
+        self.assertDictEqual(stats, expect_stats)
+        self.assertDictEqual(newstats, expect_new_stats)
+        self.assertDictEqual(self.driver.helper.storage_targets,
                              TD.n_iscsi_targets)
 
     def test_manage_existing(self):
@@ -1766,7 +1776,7 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
         self.assertTrue('provider_location' in model_update)
         pl_dict = self.load_provider_location(
             model_update['provider_location'])
-        self.assertDictMatch(pl_dict,
+        self.assertDictEqual(pl_dict,
                              {'system': TD.storage_serial_number_default,
                               'type': 'lun',
                               'id': TD.lun_id_default})
@@ -1776,7 +1786,7 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
         self.assertTrue('provider_location' in model_update)
         pl_dict = self.load_provider_location(
             model_update['provider_location'])
-        self.assertDictMatch(pl_dict,
+        self.assertDictEqual(pl_dict,
                              {'system': TD.storage_serial_number_default,
                               'type': 'lun',
                               'id': TD.lun_id_default})
@@ -1816,7 +1826,7 @@ class EMCVNXeiSCSIDriverTestCase(EMCVNXeDriverTestCase):
         self.assertTrue('provider_location' in model_update)
         pl_dict = self.load_provider_location(
             model_update['provider_location'])
-        self.assertDictMatch(pl_dict,
+        self.assertDictEqual(pl_dict,
                              {'system': TD.storage_serial_number_default,
                               'type': 'lun',
                               'id': TD.lun_id_default})
@@ -1903,7 +1913,7 @@ class EMCVNXeFCDriverTestCase(EMCVNXeDriverTestCase):
         EMCVNXeRESTClient._request.assert_has_calls(expected_calls)
 
     def test_fc_targets(self):
-        self.assertDictMatch(self.driver.helper.storage_targets,
+        self.assertDictEqual(self.driver.helper.storage_targets,
                              TD.fc_targets)
 
     def test_initialize_connection_missing_host_with_orphan(self):
@@ -1941,7 +1951,7 @@ class EMCVNXeFCDriverTestCase(EMCVNXeDriverTestCase):
         EMCVNXeRESTClient._request = mock.Mock(side_effect=hook)
         connection_info = self.driver.initialize_connection(
             TD.os_vol_default, TD.os_connector_default)
-        self.assertDictMatch(connection_info, TD.connection_info_fc_default)
+        self.assertDictEqual(connection_info, TD.connection_info_fc_default)
         expected_calls = [
             TD.req_get_lun_by_id(TD.lun_id_default),
             # _categorize_initiators
@@ -2085,7 +2095,7 @@ class EMCVNXeFCDriverTestCase(EMCVNXeDriverTestCase):
         EMCVNXeRESTClient._request = mock.Mock(side_effect=hook)
         connection_info = self.driver.initialize_connection(
             TD.os_vol_default, TD.os_connector_default)
-        self.assertDictMatch(connection_info,
+        self.assertDictEqual(connection_info,
                              TD.connection_info_fc(
                                  [TD.spa_iom_0_fc0,
                                   TD.spb_iom_0_fc0])
@@ -2326,8 +2336,8 @@ class EMCVNXeFCDriverTestCase(EMCVNXeDriverTestCase):
         with mock.patch.object(self.configuration, 'safe_get',
                                mock.Mock(return_value='FC_BACKEND')):
             stats = self.driver.update_volume_stats()
-        self.assertDictMatch(stats, expect_stats)
-        self.assertDictMatch(self.driver.helper.storage_targets, TD.fc_targets)
+        self.assertDictEqual(stats, expect_stats)
+        self.assertDictEqual(self.driver.helper.storage_targets, TD.fc_targets)
         expected_calls = [
             TD.req_get_licenses(('id', 'isValid')),
             TD.req_get_pools(('name', 'sizeTotal', 'sizeFree', 'id',
@@ -2390,9 +2400,9 @@ class EMCVNXeFCDriverTestCase(EMCVNXeDriverTestCase):
                                mock.Mock(return_value='FC_BACKEND')):
             stats = self.driver.update_volume_stats()
             newstats = self.driver.get_volume_stats(True)
-        self.assertDictMatch(stats, expect_stats)
-        self.assertDictMatch(newstats, expect_new_stats)
-        self.assertDictMatch(self.driver.helper.storage_targets,
+        self.assertDictEqual(stats, expect_stats)
+        self.assertDictEqual(newstats, expect_new_stats)
+        self.assertDictEqual(self.driver.helper.storage_targets,
                              TD.n_fc_targets)
         expected_calls = [
             TD.req_get_licenses(('id', 'isValid')),
